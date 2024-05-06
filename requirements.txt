@@ -28,7 +28,7 @@ distro==1.9.0
     # via
     #   anthropic
     #   openai
-django==5.0.4
+django==5.0.5
     # via -r requirements.in
 filelock==3.14.0
     # via huggingface-hub
@@ -44,6 +44,7 @@ httpx==0.27.0
     # via
     #   anthropic
     #   openai
+    #   python-telegram-bot
 huggingface-hub==0.23.0
     # via tokenizers
 idna==3.7
@@ -53,7 +54,7 @@ idna==3.7
     #   requests
 miniagents==0.0.8
     # via -r requirements.in
-openai==1.25.2
+openai==1.26.0
     # via -r requirements.in
 packaging==24.0
     # via huggingface-hub
@@ -69,6 +70,8 @@ pydantic==2.7.1
 pydantic-core==2.18.2
     # via pydantic
 python-dotenv==1.0.1
+    # via -r requirements.in
+python-telegram-bot==21.1.1
     # via -r requirements.in
 pyyaml==6.0.1
     # via huggingface-hub
