@@ -1,5 +1,5 @@
 anthropic==0.25.7
-django==5.0.5
+django==5.0.4
 miniagents==0.0.8
 openai==1.26.0
 promptlayer==0.5.6

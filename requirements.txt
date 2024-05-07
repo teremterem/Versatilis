@@ -28,7 +28,7 @@ distro==1.9.0
     # via
     #   anthropic
     #   openai
-django==5.0.5
+django==5.0.4
     # via -r requirements.in
 filelock==3.14.0
     # via huggingface-hub
