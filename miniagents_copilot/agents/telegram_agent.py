@@ -19,5 +19,5 @@ async def telegram_agent(ctx: InteractionContext) -> None:
         message = await message_promise.acollect()
         update = Update.de_json(message.model_dump(), telegram_app.bot)
         print()
-        pprint(update.to_json())
+        pprint(update.to_dict())
         print()
