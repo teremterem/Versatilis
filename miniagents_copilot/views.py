@@ -8,8 +8,7 @@ import logging
 from django.http import HttpRequest, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 
-from miniagents_copilot.agents.telegram_agent import telegram_agent
-from miniagents_copilot.telegram_bot import TelegramUpdateMessage
+from miniagents_copilot.agents.telegram_agent import telegram_agent, TelegramUpdateMessage
 
 logger = logging.getLogger(__name__)
 

@@ -4,10 +4,14 @@ A miniagent that is connected to a Telegram bot.
 
 from pprint import pprint
 
+from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 from telegram import Update
+from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.telegram_bot import telegram_app
+from versatilis_config import TELEGRAM_TOKEN
+
+telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 
 @miniagent
@@ -21,3 +25,9 @@ async def telegram_agent(ctx: InteractionContext) -> None:
         print()
         pprint(update.to_dict())
         print()
+
+
+class TelegramUpdateMessage(Message):
+    """
+    Telegram update MiniAgent message.
+    """
