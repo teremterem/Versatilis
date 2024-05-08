@@ -94,8 +94,16 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
         message = await message_promise.acollect()
         await telegram_app.bot.send_message(telegram_chat_id, str(message))
 
-    user_input = await active_chats[telegram_chat_id].get()
-    ctx.reply(user_input)
+    chat_queue = active_chats[telegram_chat_id]
+    ctx.reply(await chat_queue.get())
+    try:
+        while True:
+            # let's give the user a chance to send more messages
+            ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=7))
+    except asyncio.TimeoutError:
+        # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
+        # response
+        pass
 
 
 @miniagent
