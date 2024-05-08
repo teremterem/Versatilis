@@ -170,11 +170,11 @@ LOGGING = {
             "level": DJANGO_LOG_LEVEL,
             "propagate": False,
         },
-        # "miniagents_copilot.models": {
-        #     "handlers": ["console"],
-        #     "level": "DEBUG",
-        #     "propagate": False,
-        # },
+        "miniagents.ext.llms.anthropic": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
     },
 }
 if DEBUG_DJANGO_REQUESTS:

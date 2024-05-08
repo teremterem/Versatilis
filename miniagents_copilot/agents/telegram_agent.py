@@ -3,6 +3,7 @@ A miniagent that is connected to a Telegram bot.
 """
 
 import asyncio
+import logging
 from collections import defaultdict
 
 from miniagents.messages import Message
@@ -11,6 +12,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder
 
 from versatilis_config import TELEGRAM_TOKEN, anthropic_agent
+
+logger = logging.getLogger(__name__)
 
 telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -22,10 +25,14 @@ async def telegram_update_agent(ctx: InteractionContext) -> None:
     """
     MiniAgent that receives Telegram updates from the webhook.
     """
-    async for message_promise in ctx.messages:
-        message = await message_promise.acollect()
-        update: Update = Update.de_json(message.model_dump(), telegram_app.bot)
-        await process_telegram_update(update)
+    # noinspection PyBroadException
+    try:
+        async for message_promise in ctx.messages:
+            message = await message_promise.acollect()
+            update: Update = Update.de_json(message.model_dump(), telegram_app.bot)
+            await process_telegram_update(update)
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("ERROR PROCESSING A TELEGRAM UPDATE")
 
 
 async def process_telegram_update(update: Update) -> None:
@@ -40,20 +47,18 @@ async def process_telegram_update(update: Update) -> None:
         return
 
     if update.effective_message.text == "/start":
-        # the following function will not return until the conversation is over (and it is never over :D)
-        await conversation_loop(telegram_chat_id=update.effective_chat.id)
+        if update.effective_chat.id not in active_chats:
+            # Start a conversation if it is not already started.
+            # The following function will not return until the conversation is over (and it is never over :D)
+            await conversation_loop(telegram_chat_id=update.effective_chat.id)
         return
 
-    # TODO TODO TODO
-    reply_sequence = anthropic_agent.inquire(
-        update.effective_message.text,
-        model="claude-3-haiku-20240307",  # "claude-3-opus-20240229",
-        max_tokens=1000,
-        temperature=0.0,
-    )
-    async for reply_promise in reply_sequence:
-        reply = await reply_promise.acollect()
-        await update.effective_chat.send_message(str(reply))
+    if update.effective_chat.id not in active_chats:
+        # conversation is not started yet
+        return
+
+    queue = active_chats[update.effective_chat.id]
+    await queue.put(update.effective_message.text)
 
 
 async def conversation_loop(telegram_chat_id: int) -> None:
@@ -61,12 +66,22 @@ async def conversation_loop(telegram_chat_id: int) -> None:
     Conversation loop between the user and the Versatilis agent.
     """
     # TODO Oleksandr: introduce a concept of conversation managers into the MiniAgent framework
-    user_messages = []
+    history = []
+
     while True:
-        versatilis_message_sequence = versatilis_agent.inquire(user_messages)
-        user_messages = await user_agent.inquire(  # let's wait for the messages to avoid fast loop
-            versatilis_message_sequence, telegram_chat_id=telegram_chat_id
-        ).acollect_messages()
+        # TODO Oleksandr: implement a utility in MiniAgents that deep-copies/freezes mutable data containers
+        #  while keeping objects of other types intact and use it in AppendProducer to freeze the state of those
+        #  objects upon their submission (this way the user will not have to worry about things like `list(history)`
+        #  in the code below)
+        versatilis_reply_sequence = versatilis_agent.inquire(list(history))
+        # we are putting the whole sequence as one element (the framework supports this)
+        history.append(versatilis_reply_sequence)
+
+        user_replies = await user_agent.inquire(
+            versatilis_reply_sequence, telegram_chat_id=telegram_chat_id
+        ).acollect_messages()  # let's wait for user messages to avoid instant looping
+
+        history.extend(user_replies)
 
 
 @miniagent
@@ -75,9 +90,12 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     This is a proxy agent that represents the user in the conversation loop.
     """
     async for message_promise in ctx.messages:
+        await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
         message = await message_promise.acollect()
         await telegram_app.bot.send_message(telegram_chat_id, str(message))
-    await asyncio.sleep(5)
+
+    user_input = await active_chats[telegram_chat_id].get()
+    ctx.reply(user_input)
 
 
 @miniagent
@@ -89,14 +107,17 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     if messages:
         ctx.reply(
             anthropic_agent.inquire(
-                messages,
+                [
+                    "/start",  # Anthropic requires the first message to come from the user
+                    messages,
+                ],
                 model="claude-3-haiku-20240307",  # "claude-3-opus-20240229",
                 max_tokens=1000,
                 temperature=0.0,
             )
         )
     else:
-        ctx.reply("Hello, I am Versatilis. How can I help you?")
+        ctx.reply(Message(text="Hello, I am Versatilis. How can I help you?", role="assistant"))
 
 
 class TelegramUpdateMessage(Message):
