@@ -10,6 +10,8 @@ from miniagents.miniagents import MiniAgents
 
 load_dotenv()
 
+TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
+
 DJANGO_SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
 DJANGO_DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() == "true"
@@ -17,7 +19,8 @@ DEBUG_DJANGO_REQUESTS = os.environ.get("DEBUG_DJANGO_REQUESTS", "False").lower()
 DJANGO_LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL") or "INFO"
 VERSATILIS_LOG_LEVEL = os.environ.get("VERSATILIS_LOG_LEVEL") or "INFO"
 
-DJANGO_HOSTNAME = os.environ.get("DJANGO_HOSTNAME")
+DJANGO_HOSTNAME = os.environ["DJANGO_HOSTNAME"]
+WEBHOOK_BASE_URL = f"https://{DJANGO_HOSTNAME}"
 
 mini_agents = MiniAgents()
 
