@@ -3,6 +3,7 @@ A miniagent that is connected to a Telegram bot.
 """
 
 import asyncio
+from collections import defaultdict
 
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
@@ -12,6 +13,8 @@ from telegram.ext import ApplicationBuilder
 from versatilis_config import TELEGRAM_TOKEN, anthropic_agent
 
 telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+active_chats: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
 
 
 @miniagent
@@ -82,7 +85,18 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main agent.
     """
-    ctx.reply("Hello, I am Versatilis. How can I help you?")
+    messages = await ctx.messages.acollect_messages()
+    if messages:
+        ctx.reply(
+            anthropic_agent.inquire(
+                messages,
+                model="claude-3-haiku-20240307",  # "claude-3-opus-20240229",
+                max_tokens=1000,
+                temperature=0.0,
+            )
+        )
+    else:
+        ctx.reply("Hello, I am Versatilis. How can I help you?")
 
 
 class TelegramUpdateMessage(Message):

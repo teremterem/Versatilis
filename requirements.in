@@ -1,6 +1,6 @@
-anthropic==0.25.7
-django==5.0.4
-miniagents==0.0.8
+anthropic==0.25.8
+django==5.0.6
+# miniagents==0.0.9
 openai==1.26.0
 promptlayer==0.5.6
 psycopg2==2.9.9
