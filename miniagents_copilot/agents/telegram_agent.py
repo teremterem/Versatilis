@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
+from miniagents.utils import split_messages
 from telegram import Update
 from telegram.ext import ApplicationBuilder
 
@@ -94,10 +95,11 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     """
     This is a proxy agent that represents the user in the conversation loop.
     """
-    async for message_promise in ctx.messages:
+    async for message_promise in split_messages(ctx.messages):
         await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
         message = await message_promise.acollect()
         await telegram_app.bot.send_message(telegram_chat_id, str(message))
+        # await asyncio.sleep(2)
 
     chat_queue = active_chats[telegram_chat_id]
     ctx.reply(await chat_queue.get())
@@ -123,7 +125,8 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
         ctx.reply(
             anthropic_agent.inquire(
                 messages,
-                model="claude-3-haiku-20240307",  # "claude-3-opus-20240229",
+                # model="claude-3-haiku-20240307",
+                model="claude-3-opus-20240229",
                 max_tokens=1000,
                 temperature=0.0,
             )
