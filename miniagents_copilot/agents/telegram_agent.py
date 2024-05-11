@@ -4,7 +4,6 @@ A miniagent that is connected to a Telegram bot.
 
 import asyncio
 import logging
-from collections import defaultdict
 
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-active_chats: dict[int, asyncio.Queue] = defaultdict(asyncio.Queue)
+active_chats: dict[int, asyncio.Queue] = {}
 
 
 @miniagent
@@ -51,6 +50,7 @@ async def process_telegram_update(update: Update) -> None:
         if update.effective_chat.id not in active_chats:
             # Start a conversation if it is not already started.
             # The following function will not return until the conversation is over (and it is never over :D)
+            active_chats[update.effective_chat.id] = asyncio.Queue()
             await conversation_loop(telegram_chat_id=update.effective_chat.id)
         return
 
@@ -97,15 +97,19 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     """
     async for message_promise in split_messages(ctx.messages):
         await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
+
+        # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
+        # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
+        await asyncio.sleep(1)
+
         message = await message_promise.acollect()
         await telegram_app.bot.send_message(telegram_chat_id, str(message))
-        # await asyncio.sleep(2)
 
     chat_queue = active_chats[telegram_chat_id]
     ctx.reply(await chat_queue.get())
     try:
         # let's give the user a chance to send a follow-up if they forgot something
-        ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=4))
+        ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=3))
         while True:
             # if they did actually send a follow-up, then let's wait for a bit longer
             ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=15))
@@ -125,8 +129,8 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
         ctx.reply(
             anthropic_agent.inquire(
                 messages,
-                # model="claude-3-haiku-20240307",
-                model="claude-3-opus-20240229",
+                model="claude-3-haiku-20240307",
+                # model="claude-3-opus-20240229",
                 max_tokens=1000,
                 temperature=0.0,
             )
