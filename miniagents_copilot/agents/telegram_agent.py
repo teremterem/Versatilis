@@ -71,6 +71,7 @@ async def conversation_loop(telegram_chat_id: int) -> None:
     # TODO Oleksandr: introduce a concept of conversation managers into the MiniAgent framework
     history = []
 
+    error = None
     while True:
         # noinspection PyBroadException
         try:
@@ -78,18 +79,29 @@ async def conversation_loop(telegram_chat_id: int) -> None:
             #  while keeping objects of other types intact and use it in AppendProducer to freeze the state of those
             #  objects upon their submission (this way the user will not have to worry about things like `list(history)`
             #  in the code below)
-            versatilis_reply_sequence = versatilis_agent.inquire(list(history))
-            # we are putting the whole sequence as one element (the framework supports this)
-            history.append(versatilis_reply_sequence)
+            if error:
+                # if there was an error then we just wait for the user input and don't ask Versatilis again
+                versatilis_reply_sequence = ["Sorry, something went wrong 🤖", str(error)]
+            else:
+                versatilis_reply_sequence = versatilis_agent.inquire(list(history))
+                # we are putting the whole sequence as one element (the framework supports this)
+                # TODO Oleksandr: don't just blindly put the whole Versatilis response into the history, better make
+                #  the history a responsibility of the user agent, so it only puts into the history the messages that
+                #  it successfully delivered to the user
+                history.append(versatilis_reply_sequence)
 
             user_replies = await user_agent.inquire(
                 versatilis_reply_sequence, telegram_chat_id=telegram_chat_id
             ).acollect_messages()  # let's wait for user messages to avoid instant looping
 
             history.extend(user_replies)
-        except Exception:  # pylint: disable=broad-except
+            error = None
+        except Exception as exc:  # pylint: disable=broad-except
+            if error:
+                # this is the second error in a row - let's break the loop
+                raise exc from error
             logger.exception("ERROR IN THE CONVERSATION LOOP")
-            await asyncio.sleep(1)  # let's not spam the logs
+            error = exc
 
 
 @miniagent
