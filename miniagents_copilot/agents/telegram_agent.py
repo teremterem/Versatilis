@@ -5,10 +5,12 @@ A miniagent that is connected to a Telegram bot.
 import asyncio
 import logging
 
+import telegram.error
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 from miniagents.utils import split_messages
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
 from versatilis_config import TELEGRAM_TOKEN, anthropic_agent
@@ -103,7 +105,12 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
         await asyncio.sleep(1)
 
         message = await message_promise.acollect()
-        await telegram_app.bot.send_message(telegram_chat_id, str(message))
+        try:
+            await telegram_app.bot.send_message(
+                chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
+            )
+        except telegram.error.BadRequest:
+            await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
 
     chat_queue = active_chats[telegram_chat_id]
     ctx.reply(await chat_queue.get())
