@@ -1,5 +1,5 @@
 """
-A miniagent that is connected to a Telegram bot.
+A MiniAgent that is connected to a Telegram bot.
 """
 
 import asyncio
@@ -13,7 +13,8 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from versatilis_config import TELEGRAM_TOKEN, anthropic_agent
+from miniagents_copilot.agents.versatilis_agent import versatilis_agent
+from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -136,26 +137,6 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
         # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
         # response
         pass
-
-
-@miniagent
-async def versatilis_agent(ctx: InteractionContext) -> None:
-    """
-    The main agent.
-    """
-    messages = await ctx.messages.acollect_messages()
-    if messages:
-        ctx.reply(
-            anthropic_agent.inquire(
-                messages,
-                model="claude-3-haiku-20240307",
-                # model="claude-3-opus-20240229",
-                max_tokens=1000,
-                temperature=0.0,
-            )
-        )
-    else:
-        ctx.reply(Message(text="Hello, I am Versatilis. How can I help you?", role="assistant"))
 
 
 class TelegramUpdateMessage(Message):
