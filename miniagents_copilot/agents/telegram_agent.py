@@ -1,10 +1,9 @@
 """
-A miniagent that is connected to a Telegram bot.
+A MiniAgent that is connected to a Telegram bot.
 """
 
 import asyncio
 import logging
-from pathlib import Path
 
 import telegram.error
 from miniagents.messages import Message
@@ -14,7 +13,8 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from versatilis_config import TELEGRAM_TOKEN, anthropic_agent
+from miniagents_copilot.agents.versatilis_agent import versatilis_agent
+from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -137,40 +137,6 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
         # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
         # response
         pass
-
-
-@miniagent
-async def versatilis_agent(ctx: InteractionContext) -> None:
-    """
-    The main agent.
-    """
-    messages = await ctx.messages.acollect_messages()
-    if messages:
-        ctx.reply(
-            anthropic_agent.inquire(
-                messages,
-                model="claude-3-haiku-20240307",
-                # model="claude-3-opus-20240229",
-                max_tokens=1000,
-                temperature=0.0,
-            )
-        )
-    else:
-        miniagents_dir = Path("../MiniAgents")
-        miniagent_files = [(f.relative_to(miniagents_dir).as_posix(), f) for f in miniagents_dir.rglob("*")]
-        miniagent_files = [
-            f_posix
-            for f_posix, f in miniagent_files
-            if f.is_file()
-            if not any(f_posix.startswith(prefix) for prefix in [".", "venv/", "dist/", "htmlcov/"])
-            and not any(f_posix.endswith(suffix) for suffix in [".pyc"])
-            and not any(f_posix in full_path for full_path in ["poetry.lock"])
-            and f.stat().st_size > 0
-        ]
-        miniagent_files.sort()
-        miniagent_files_str = "\n".join(miniagent_files)
-        ctx.reply(Message(text=f"```\n{miniagent_files_str}\n```", role="assistant"))
-        ctx.reply(Message(text="Hello, I am Versatilis. How can I help you?", role="assistant"))
 
 
 class TelegramUpdateMessage(Message):
