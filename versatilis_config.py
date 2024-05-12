@@ -25,11 +25,13 @@ WEBHOOK_BASE_URL = f"https://{DJANGO_HOSTNAME}"
 mini_agents = MiniAgents()
 
 if os.getenv("PROMPTLAYER_API_KEY"):
-    import promptlayer  # pylint: disable=import-outside-toplevel
+    from promptlayer import PromptLayer  # pylint: disable=import-outside-toplevel
+
+    promptlayer_client = PromptLayer()
 
     PL_TAGS_KW = {"pl_tags": [os.getenv("PL_TAG") or "versatilis-no-tag"]}
     anthropic_agent = create_anthropic_agent(
-        async_client=promptlayer.anthropic.AsyncAnthropic(),
+        async_client=promptlayer_client.anthropic.AsyncAnthropic(),
     )
 else:
     PL_TAGS_KW = {}
