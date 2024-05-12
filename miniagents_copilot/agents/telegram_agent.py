@@ -4,6 +4,7 @@ A miniagent that is connected to a Telegram bot.
 
 import asyncio
 import logging
+from pathlib import Path
 
 import telegram.error
 from miniagents.messages import Message
@@ -155,6 +156,20 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
             )
         )
     else:
+        miniagents_dir = Path("../MiniAgents")
+        miniagent_files = [(f.relative_to(miniagents_dir).as_posix(), f) for f in miniagents_dir.rglob("*")]
+        miniagent_files = [
+            f_posix
+            for f_posix, f in miniagent_files
+            if f.is_file()
+            if not any(f_posix.startswith(prefix) for prefix in [".", "venv/", "dist/", "htmlcov/"])
+            and not any(f_posix.endswith(suffix) for suffix in [".pyc"])
+            and not any(f_posix in full_path for full_path in ["poetry.lock"])
+            and f.stat().st_size > 0
+        ]
+        miniagent_files.sort()
+        miniagent_files_str = "\n".join(miniagent_files)
+        ctx.reply(Message(text=f"```\n{miniagent_files_str}\n```", role="assistant"))
         ctx.reply(Message(text="Hello, I am Versatilis. How can I help you?", role="assistant"))
 
 
