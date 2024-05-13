@@ -4,11 +4,13 @@ A MiniAgent that is connected to a Telegram bot.
 
 import asyncio
 import logging
+from functools import partial
 
 import telegram.error
 from miniagents.messages import Message, MessageType
 from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
-from miniagents.utils import split_messages
+from miniagents.promising.sentinels import AWAIT
+from miniagents.utils import split_messages, aloop_chain
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
@@ -55,7 +57,13 @@ async def process_telegram_update(update: Update) -> None:
             # Start a conversation if it is not already started.
             # The following function will not return until the conversation is over (and it is never over :D)
             active_chats[update.effective_chat.id] = asyncio.Queue()
-            await loop_chain(telegram_chat_id=update.effective_chat.id)
+            await aloop_chain(
+                agents=[
+                    versatilis_agent,
+                    partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
+                    AWAIT,
+                ],
+            )
         return
 
     if update.effective_chat.id not in active_chats:
@@ -64,16 +72,6 @@ async def process_telegram_update(update: Update) -> None:
 
     queue = active_chats[update.effective_chat.id]
     await queue.put(update.effective_message.text)
-
-
-async def loop_chain(telegram_chat_id: int, messages: MessageType = None) -> None:
-    """
-    TODO Oleksandr: move this function to `miniagents.utils` and add a docstring
-    """
-    while True:
-        messages = versatilis_agent.inquire(messages)
-        messages = user_agent.inquire(messages, telegram_chat_id=telegram_chat_id)
-        await messages.acollect_messages()  # let's wait for user messages to avoid instant looping
 
 
 @miniagent
@@ -93,7 +91,7 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     ctx.reply(history[:])
 
     with cur_interaction_seq.append_producer as interaction_appender:
-        async for message_promise in split_messages(ctx.messages):
+        async for message_promise in split_messages(ctx.messages, role="assistant"):
             await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
 
             # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
