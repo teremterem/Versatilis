@@ -15,7 +15,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agent import INITIAL_PROMPT, versatilis_agent_inquiry
+from miniagents_copilot.agents.versatilis_agent import versatilis_agent
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -57,13 +57,19 @@ async def process_telegram_update(update: Update) -> None:
             # Start a conversation if it is not already started.
             # The following function will not return until the conversation is over (and it is never over :D)
             active_chats[update.effective_chat.id] = asyncio.Queue()
-            await aloop_chain(
-                agents=[
-                    versatilis_agent_inquiry,
-                    partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
-                    AWAIT,
-                ],
-            )
+            try:
+                await aloop_chain(
+                    agents=[
+                        versatilis_agent,
+                        partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
+                        AWAIT,
+                    ],
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception("ERROR IN THE CONVERSATION LOOP")
+                await update.effective_chat.send_message("Sorry, something went wrong 🤖")
+                await update.effective_chat.send_message(str(exc))
+
         return
 
     if update.effective_chat.id not in active_chats:
@@ -80,7 +86,7 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    history = chat_histories.setdefault(telegram_chat_id, [INITIAL_PROMPT])
+    history = chat_histories.setdefault(telegram_chat_id, [])
     cur_interaction_seq = MessageSequence()
 
     history.append(cur_interaction_seq.sequence_promise)
@@ -120,7 +126,6 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
             # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
             # response from the Versatilis agent
             pass
-    # TODO Oleksandr: send "Sorry, something went wrong 🤖" followed by `str(error)` if something goes wrong
 
 
 class TelegramUpdateMessage(Message):

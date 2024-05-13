@@ -2,19 +2,28 @@
 TODO Oleksandr: figure out the role of this module
 """
 
-from functools import partial
 from pathlib import Path
+
+from miniagents.miniagents import miniagent, InteractionContext
 
 from versatilis_config import anthropic_agent
 
-versatilis_agent_inquiry = partial(
-    anthropic_agent.inquire,
-    # model="claude-3-haiku-20240307",
-    # model="claude-3-sonnet-20240229",
-    model="claude-3-opus-20240229",
-    max_tokens=1000,
-    temperature=0.0,
-)
+
+@miniagent
+async def versatilis_agent(ctx: InteractionContext) -> None:
+    """
+    The main MiniAgent.
+    """
+    ctx.reply(
+        anthropic_agent.inquire(
+            [_INITIAL_PROMPT, ctx.messages],
+            # model="claude-3-haiku-20240307",
+            # model="claude-3-sonnet-20240229",
+            model="claude-3-opus-20240229",
+            max_tokens=1000,
+            temperature=0.0,
+        )
+    )
 
 
 def _prepare_initial_prompt() -> str:
@@ -42,4 +51,4 @@ def _prepare_initial_prompt() -> str:
     )
 
 
-INITIAL_PROMPT = _prepare_initial_prompt()
+_INITIAL_PROMPT = _prepare_initial_prompt()
