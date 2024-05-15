@@ -4,9 +4,12 @@ TODO Oleksandr: figure out the role of this module
 
 from pathlib import Path
 
+from miniagents.ext.llm.openai import create_openai_agent
+from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
-from versatilis_config import anthropic_agent
+# from versatilis_config import anthropic_agent
+openai_agent = create_openai_agent(model="gpt-4o-2024-05-13")
 
 
 @miniagent
@@ -15,12 +18,26 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     The main MiniAgent.
     """
     ctx.reply(
-        anthropic_agent.inquire(
-            [_INITIAL_PROMPT, ctx.messages],
-            model="claude-3-haiku-20240307",
+        openai_agent.inquire(
+            [
+                Message(
+                    text="Here are the source files of a Python framework that I'm building.",
+                    role="system",
+                ),
+                _INITIAL_PROMPT,
+                Message(
+                    text=(
+                        "You are a harsh critic. Your job is to crush my soul by criticizing the framework I'm "
+                        "creating. Don't pick on the minor coding issues. Pick on the big picture. Be brutal."
+                    ),
+                    role="system",
+                ),
+                ctx.messages,
+            ],
+            # model="claude-3-haiku-20240307",
             # model="claude-3-sonnet-20240229",
             # model="claude-3-opus-20240229",
-            max_tokens=1000,
+            # max_tokens=1000,
             temperature=0.0,
         )
     )

@@ -5,7 +5,7 @@ Versatilis-specific configurations.
 import os
 
 from dotenv import load_dotenv
-from miniagents.ext.llms.anthropic import create_anthropic_agent
+from miniagents.ext.llm.anthropic import create_anthropic_agent
 from miniagents.miniagents import MiniAgents
 
 load_dotenv()

@@ -6,7 +6,7 @@ import logging
 from pprint import pformat
 
 from django.db import models, IntegrityError
-from miniagents.ext.llms.anthropic import AnthropicMessage
+from miniagents.ext.llm.anthropic import AnthropicMessage
 from miniagents.messages import Message
 
 from versatilis_config import mini_agents
