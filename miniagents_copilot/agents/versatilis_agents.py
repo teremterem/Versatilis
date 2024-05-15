@@ -4,21 +4,19 @@ TODO Oleksandr: figure out the role of this module
 
 from pathlib import Path
 
-from miniagents.ext.llm.openai import create_openai_agent
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
-# from versatilis_config import anthropic_agent
-openai_agent = create_openai_agent(model="gpt-4o-2024-05-13")
+from versatilis_config import anthropic_agent
 
 
 @miniagent
-async def versatilis_agent(ctx: InteractionContext) -> None:
+async def soul_crusher(ctx: InteractionContext) -> None:
     """
-    The main MiniAgent.
+    The "Soul Crusher" MiniAgent.
     """
     ctx.reply(
-        openai_agent.inquire(
+        anthropic_agent.inquire(
             [
                 Message(
                     text="Here are the source files of a Python framework that I'm building.",
@@ -34,10 +32,11 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
                 ),
                 ctx.messages,
             ],
-            # model="claude-3-haiku-20240307",
+            model="claude-3-haiku-20240307",
             # model="claude-3-sonnet-20240229",
             # model="claude-3-opus-20240229",
-            # max_tokens=1000,
+            # model="gpt-4o-2024-05-13",
+            max_tokens=1500,
             temperature=0.0,
         )
     )

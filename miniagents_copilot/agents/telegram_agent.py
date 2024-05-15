@@ -10,12 +10,12 @@ import telegram.error
 from miniagents.messages import Message, MessageType
 from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
 from miniagents.promising.sentinels import AWAIT
-from miniagents.utils import split_messages, aloop_chain
+from miniagents.utils import achain_loop, split_messages
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agent import versatilis_agent
+from miniagents_copilot.agents.versatilis_agents import soul_crusher
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,9 @@ async def process_telegram_update(update: Update) -> None:
             # The following function will not return until the conversation is over (and it is never over :D)
             active_chats[update.effective_chat.id] = asyncio.Queue()
             try:
-                await aloop_chain(
+                await achain_loop(
                     agents=[
-                        versatilis_agent,
+                        soul_crusher,
                         partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
                         AWAIT,
                     ],
