@@ -61,6 +61,7 @@ async def process_telegram_update(update: Update) -> None:
                 await achain_loop(
                     agents=[
                         soul_crusher,
+                        echo_to_console,
                         partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
                         AWAIT,
                     ],
@@ -78,6 +79,17 @@ async def process_telegram_update(update: Update) -> None:
 
     queue = active_chats[update.effective_chat.id]
     await queue.put(update.effective_message.text)
+
+
+@miniagent
+async def echo_to_console(ctx: InteractionContext) -> None:
+    """
+    MiniAgent that echoes messages to the console token by token.
+    """
+    ctx.reply(ctx.messages)  # return the messages as they are
+    async for message_promise in ctx.messages:
+        async for token in message_promise:
+            print(f"\033[92;1m{token}\033[0m", end="", flush=True)
 
 
 @miniagent
