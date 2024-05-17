@@ -42,8 +42,8 @@ class LangModelGenerationStats(models.Model):
     output_token_num = models.IntegerField(null=True, blank=True)
 
 
-@mini_agents.on_serialize_message
-async def on_serialize_message(_, message: Message) -> None:
+@mini_agents.on_persist_message
+async def on_persist_message(_, message: Message) -> None:
     """
     Persist Versatilis Messages in the database.
     """
