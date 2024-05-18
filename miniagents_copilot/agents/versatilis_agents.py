@@ -19,11 +19,16 @@ async def full_repo_agent(ctx: InteractionContext, setup_folder: str) -> None:
     system_header = (BASE_SETUP_FOLDER / setup_folder / "setup/system-header.md").read_text(encoding="utf-8")
     system_footer = (BASE_SETUP_FOLDER / setup_folder / "setup/system-footer.md").read_text(encoding="utf-8")
 
+    full_repo_message = FullRepoMessage.create()
+    full_repo_md_file = BASE_SETUP_FOLDER / setup_folder / "transient/full-repo.md"
+    full_repo_md_file.parent.mkdir(parents=True, exist_ok=True)
+    full_repo_md_file.write_text(str(full_repo_message), encoding="utf-8")
+
     ctx.reply(
         anthropic_agent.inquire(
             [
                 Message(text=system_header, role="system"),
-                FullRepoMessage.create(),
+                full_repo_message,
                 Message(text=system_footer, role="system"),
                 ctx.messages,
             ],
