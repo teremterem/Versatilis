@@ -9,8 +9,8 @@ from django.db import models, IntegrityError
 from miniagents.ext.llm.anthropic import AnthropicMessage
 from miniagents.messages import Message
 
-from versatilis_config import mini_agents
 from miniagents_copilot.utils import current_time_utc_ms
+from versatilis_config import mini_agents
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +48,14 @@ async def on_persist_message(_, message: Message) -> None:
     Persist Versatilis Messages in the database.
     """
     data_node = None
-    serialized_msg = None
 
     try:
-        serialized_msg = message.serialize()
-        data_node = await DataNode.objects.acreate(
-            hash_key=message.hash_key,
-            node_class=message.class_,
-            payload=serialized_msg,
-        )
+        if getattr(message, "persist_to_db", True):
+            data_node = await DataNode.objects.acreate(
+                hash_key=message.hash_key,
+                node_class=message.class_,
+                payload=message.serialize(),
+            )
 
     except IntegrityError:
         data_node = await DataNode.objects.aget(hash_key=message.hash_key)
@@ -78,5 +77,5 @@ async def on_persist_message(_, message: Message) -> None:
                 "COLLECTED: %s\n\n%s\n\n%s\n",
                 message.class_,
                 message.hash_key,
-                pformat(serialized_msg, width=119),
+                pformat(message.serialize(), width=119),
             )

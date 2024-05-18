@@ -10,7 +10,6 @@ from miniagents.miniagents import miniagent, InteractionContext
 
 from versatilis_config import anthropic_agent
 
-
 BASE_SETUP_FOLDER = Path("../talk-about-miniagents")
 
 
@@ -25,7 +24,7 @@ async def full_repo_agent(ctx: InteractionContext, setup_folder: str) -> None:
         anthropic_agent.inquire(
             [
                 Message(text=system_header, role="system"),
-                _INITIAL_PROMPT,
+                FullRepoMessage.create(),
                 Message(text=system_footer, role="system"),
                 ctx.messages,
             ],
@@ -43,29 +42,54 @@ async def full_repo_agent(ctx: InteractionContext, setup_folder: str) -> None:
 soul_crusher = miniagent(wraps(full_repo_agent)(partial(full_repo_agent, setup_folder="soul-crusher")))
 
 
-def _prepare_initial_prompt() -> str:
-    miniagents_dir = Path("../MiniAgents")
-    miniagent_files = [(f.relative_to(miniagents_dir).as_posix(), f) for f in miniagents_dir.rglob("*")]
-    miniagent_files = [
-        (f_posix, f)
-        for f_posix, f in miniagent_files
-        if f.is_file()
-        if (
-            not any(f_posix.startswith(prefix) for prefix in [".", "venv/", "dist/", "htmlcov/"])
-            and not any(f_posix.endswith(suffix) for suffix in [".pyc"])
-            and not any(f_posix in full_path for full_path in ["poetry.lock"])
-            and f.stat().st_size > 0
-        )
-    ]
-    miniagent_files.sort(key=lambda entry: entry[0])
-    miniagent_files_str = "\n".join([f_posix for f_posix, _ in miniagent_files])
+class RepoFileMessage(Message):
+    """
+    A message that represents a file in the MiniAgents repository.
+    """
 
-    return "\n\n\n\n".join(
-        [
-            f"```\n{miniagent_files_str}\n```",
-            *(f"{f_posix}\n```\n{f.read_text(encoding="utf-8")}\n```" for f_posix, f in miniagent_files),
+    file_posix_path: str
+
+    def _as_string(self) -> str:
+        return f"{self.file_posix_path}\n```\n{self.text}\n```"
+
+
+class FullRepoMessage(Message):
+    """
+    A message that represents the full content of the MiniAgents repository.
+    """
+
+    repo_files: tuple[RepoFileMessage, ...]
+
+    @classmethod
+    def create(cls) -> "FullRepoMessage":
+        """
+        Create a FullRepoMessage object that contains the full content of the MiniAgents repository. (Take a snapshot
+        of the files as they currently are, in other words.)
+        """
+        miniagents_dir = Path("../MiniAgents")
+        miniagent_files = [
+            (file.relative_to(miniagents_dir).as_posix(), file)
+            for file in miniagents_dir.rglob("*")
+            if file.is_file() and file.stat().st_size > 0
         ]
-    )
+        miniagent_files = [
+            RepoFileMessage(file_posix_path=file_posix_path, text=file.read_text(encoding="utf-8"))
+            for file_posix_path, file in miniagent_files
+            if (
+                not any(file_posix_path.startswith(prefix) for prefix in [".", "venv/", "dist/", "htmlcov/"])
+                and not any(file_posix_path.endswith(suffix) for suffix in [".pyc"])
+                and not any(file_posix_path in full_path for full_path in ["poetry.lock"])
+            )
+        ]
+        miniagent_files.sort(key=lambda file_message: file_message.file_posix_path)
+        return cls(repo_files=miniagent_files)
 
+    def _as_string(self) -> str:
+        miniagent_files_str = "\n".join([file_message.file_posix_path for file_message in self.repo_files])
 
-_INITIAL_PROMPT = _prepare_initial_prompt()
+        return "\n\n\n\n".join(
+            [
+                f"```\n{miniagent_files_str}\n```",
+                *[str(file_message) for file_message in self.repo_files],
+            ]
+        )
