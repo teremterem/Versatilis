@@ -54,7 +54,8 @@ class RepoFileMessage(Message):
     file_posix_path: str
 
     def _as_string(self) -> str:
-        return f"{self.file_posix_path}\n```\n{self.text}\n```"
+        extra_newline = "" if self.text.endswith("\n") else "\n"
+        return f"{self.file_posix_path}\n```\n{self.text}{extra_newline}```"
 
 
 class FullRepoMessage(Message):
