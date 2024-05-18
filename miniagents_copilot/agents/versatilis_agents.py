@@ -2,28 +2,45 @@
 TODO Oleksandr: figure out the role of this module
 """
 
+from functools import partial, wraps
 from pathlib import Path
 
+from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
 from versatilis_config import anthropic_agent
 
 
-@miniagent
-async def versatilis_agent(ctx: InteractionContext) -> None:
+BASE_SETUP_FOLDER = Path("../talk-about-miniagents")
+
+
+async def full_repo_agent(ctx: InteractionContext, setup_folder: str) -> None:
     """
-    The main MiniAgent.
+    MiniAgent that receives the complete content of the MiniAgents project in its prompt.
     """
+    system_header = (BASE_SETUP_FOLDER / setup_folder / "setup/system-header.md").read_text(encoding="utf-8")
+    system_footer = (BASE_SETUP_FOLDER / setup_folder / "setup/system-footer.md").read_text(encoding="utf-8")
+
     ctx.reply(
         anthropic_agent.inquire(
-            [_INITIAL_PROMPT, ctx.messages],
+            [
+                Message(text=system_header, role="system"),
+                _INITIAL_PROMPT,
+                Message(text=system_footer, role="system"),
+                ctx.messages,
+            ],
             model="claude-3-haiku-20240307",
             # model="claude-3-sonnet-20240229",
             # model="claude-3-opus-20240229",
-            max_tokens=1000,
+            # model="gpt-4o-2024-05-13",
+            max_tokens=1500,
             temperature=0.0,
         )
     )
+
+
+# noinspection PyTypeChecker
+soul_crusher = miniagent(wraps(full_repo_agent)(partial(full_repo_agent, setup_folder="soul-crusher")))
 
 
 def _prepare_initial_prompt() -> str:

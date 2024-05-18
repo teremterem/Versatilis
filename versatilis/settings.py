@@ -170,7 +170,7 @@ LOGGING = {
             "level": DJANGO_LOG_LEVEL,
             "propagate": False,
         },
-        "miniagents.ext.llms.anthropic": {
+        "miniagents.ext.llm": {
             "handlers": ["console"],
             "level": "DEBUG",
             "propagate": False,

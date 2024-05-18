@@ -10,12 +10,12 @@ import telegram.error
 from miniagents.messages import Message, MessageType
 from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
 from miniagents.promising.sentinels import AWAIT
-from miniagents.utils import split_messages, aloop_chain
+from miniagents.utils import achain_loop, split_messages
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agent import versatilis_agent
+from miniagents_copilot.agents.versatilis_agents import soul_crusher
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,10 @@ async def process_telegram_update(update: Update) -> None:
             # The following function will not return until the conversation is over (and it is never over :D)
             active_chats[update.effective_chat.id] = asyncio.Queue()
             try:
-                await aloop_chain(
+                await achain_loop(
                     agents=[
-                        versatilis_agent,
+                        soul_crusher,
+                        echo_to_console,
                         partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
                         AWAIT,
                     ],
@@ -78,6 +79,17 @@ async def process_telegram_update(update: Update) -> None:
 
     queue = active_chats[update.effective_chat.id]
     await queue.put(update.effective_message.text)
+
+
+@miniagent
+async def echo_to_console(ctx: InteractionContext) -> None:
+    """
+    MiniAgent that echoes messages to the console token by token.
+    """
+    ctx.reply(ctx.messages)  # return the messages as they are
+    async for message_promise in ctx.messages:
+        async for token in message_promise:
+            print(f"\033[92;1m{token}\033[0m", end="", flush=True)
 
 
 @miniagent

@@ -22,7 +22,7 @@ async def telegram_webhook(request: HttpRequest) -> HttpResponse:
     try:
         request_json = json.loads(request.body)
         # TODO Oleksandr: `delegate` instead of `inquire`
-        telegram_update_agent.inquire(TelegramUpdateMessage(**request_json))
+        telegram_update_agent.inquire(TelegramUpdateMessage(**request_json), schedule_immediately=True)
     except Exception:  # pylint: disable=broad-except
         logger.exception("FAILED TO PROCESS TELEGRAM UPDATE")
 

@@ -5,7 +5,8 @@ Versatilis-specific configurations.
 import os
 
 from dotenv import load_dotenv
-from miniagents.ext.llms.anthropic import create_anthropic_agent
+from miniagents.ext.llm.anthropic import create_anthropic_agent
+from miniagents.ext.llm.openai import create_openai_agent
 from miniagents.miniagents import MiniAgents
 
 load_dotenv()
@@ -33,6 +34,10 @@ if os.getenv("PROMPTLAYER_API_KEY"):
     anthropic_agent = create_anthropic_agent(
         async_client=promptlayer_client.anthropic.AsyncAnthropic(),
     )
+    openai_agent = create_openai_agent(
+        async_client=promptlayer_client.openai.AsyncOpenAI(),
+    )
 else:
     PL_TAGS_KW = {}
     anthropic_agent = create_anthropic_agent()
+    openai_agent = create_openai_agent()
