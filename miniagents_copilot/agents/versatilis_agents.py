@@ -2,7 +2,6 @@
 TODO Oleksandr: figure out the role of this module
 """
 
-from functools import partial, wraps
 from pathlib import Path
 
 from miniagents.messages import Message
@@ -38,8 +37,8 @@ async def full_repo_agent(ctx: InteractionContext, setup_folder: str) -> None:
     )
 
 
-# noinspection PyTypeChecker
-soul_crusher = miniagent(wraps(full_repo_agent)(partial(full_repo_agent, setup_folder="soul-crusher")))
+# TODO Oleksandr: figure out why the type checker is not happy with the following line
+soul_crusher = miniagent(full_repo_agent, setup_folder="soul-crusher")
 
 
 class RepoFileMessage(Message):
