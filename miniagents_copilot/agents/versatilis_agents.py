@@ -10,14 +10,13 @@ from miniagents.miniagents import miniagent, InteractionContext
 from versatilis_config import anthropic_agent
 
 BASE_SETUP_FOLDER = Path("../talk-about-miniagents")
+SOUL_CRUSHER_FOLDER = BASE_SETUP_FOLDER / "soul-crusher"
 
 
-async def full_repo_agent(ctx: InteractionContext, agent_folder: str, model: str) -> None:
+async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, model: str) -> None:
     """
     MiniAgent that receives the complete content of the MiniAgents project in its prompt.
     """
-    agent_folder = BASE_SETUP_FOLDER / agent_folder
-
     system_header = (agent_folder / "setup/system-header.md").read_text(encoding="utf-8")
     system_footer = (agent_folder / "setup/system-footer.md").read_text(encoding="utf-8")
 
@@ -25,24 +24,6 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: str, model: str
     full_repo_md_file = agent_folder / "transient/full-repo.md"
     full_repo_md_file.parent.mkdir(parents=True, exist_ok=True)
     full_repo_md_file.write_text(str(full_repo_message), encoding="utf-8")
-
-    chat_history_file = agent_folder / "CHAT.md"
-    last_role = None
-    with chat_history_file.open("w", encoding="utf-8") as chat_history:
-        async for message_promise in ctx.messages:
-            message = await message_promise.acollect()
-
-            role = getattr(message, "role", None) or "user"
-            if role == "assistant":
-                role = model
-
-            if role != last_role:
-                if last_role is not None:
-                    chat_history.write("\n")
-                chat_history.write(f"{role}\n-------------------------------")
-                last_role = role
-
-            chat_history.write(f"\n{message}\n")
 
     ctx.reply(
         anthropic_agent.inquire(
@@ -61,12 +42,43 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: str, model: str
 
 soul_crusher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
-    agent_folder="soul-crusher",
+    agent_folder=SOUL_CRUSHER_FOLDER,
     model="claude-3-haiku-20240307",
     # model="claude-3-sonnet-20240229",
     # model="claude-3-opus-20240229",
     # model="gpt-4o-2024-05-13",
 )
+
+
+@miniagent(agent_folder=SOUL_CRUSHER_FOLDER)
+async def history_agent(ctx: InteractionContext, agent_folder: Path) -> None:
+    """
+    TODO Oleksandr: docstring
+    """
+    chat_history_file = agent_folder / "CHAT.md"
+    last_role = None
+    with chat_history_file.open("w", encoding="utf-8") as chat_history:
+        async for message_promise in ctx.messages:
+            message = await message_promise.acollect()
+
+            role = getattr(message, "role", None) or "user"
+            if role == "assistant":
+                try:
+                    role = message.openai.model
+                except AttributeError:
+                    try:
+                        role = message.anthropic.model
+                    except AttributeError:
+                        pass
+
+            if role != last_role:
+                if last_role is not None:
+                    chat_history.write("\n")
+                chat_history.write(f"{role}\n-------------------------------")
+                last_role = role
+
+            chat_history.write(f"\n{message}\n")
+            chat_history.flush()
 
 
 class RepoFileMessage(Message):

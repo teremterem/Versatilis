@@ -15,7 +15,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agents import soul_crusher
+from miniagents_copilot.agents.versatilis_agents import soul_crusher, history_agent
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -107,6 +107,8 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     #  objects upon their submission (this way the user will not have to worry about things like `history[:]`
     #  in the code below)
     ctx.reply(history[:])
+
+    history_agent.inquire(history, schedule_immediately=True)  # TODO Oleksandr: `delegate` instead of `inquire`
 
     with cur_interaction_seq.append_producer as interaction_appender:
         async for message_promise in split_messages(ctx.messages, role="assistant"):
