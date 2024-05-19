@@ -6,7 +6,7 @@ import logging
 from pprint import pformat
 
 from django.db import models, IntegrityError
-from miniagents.ext.llm.anthropic import AnthropicMessage
+from miniagents.ext.llm.llm_common import LangModelMessage
 from miniagents.messages import Message
 
 from miniagents_copilot.utils import current_time_utc_ms
@@ -63,7 +63,7 @@ async def on_persist_message(_, message: Message) -> None:
         await data_node.asave(update_fields=["touched_timestamp_ms"])
 
     finally:
-        if isinstance(message, AnthropicMessage):
+        if isinstance(message, LangModelMessage):
             try:
                 input_token_num = message.usage.input_tokens
                 output_token_num = message.usage.output_tokens
