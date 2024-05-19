@@ -8,7 +8,7 @@ from functools import partial
 
 import telegram.error
 from miniagents.messages import Message
-from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
+from miniagents.miniagents import miniagent, InteractionContext
 from miniagents.promising.sentinels import AWAIT
 from miniagents.utils import achain_loop, split_messages
 from telegram import Update
@@ -59,10 +59,11 @@ async def process_telegram_update(update: Update) -> None:
             try:
                 await achain_loop(
                     agents=[
+                        history_agent,
+                        AWAIT,
                         soul_crusher,
                         echo_to_console,
                         partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
-                        AWAIT,
                     ],
                 )
             except Exception as exc:  # pylint: disable=broad-except
@@ -97,23 +98,15 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    cur_interaction_seq = MessageSequence()
+    async for message_promise in split_messages(ctx.messages, role="assistant"):
+        await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
 
-    # TODO Oleksandr: `delegate` instead of `inquire` ?
-    history = history_agent.inquire(cur_interaction_seq.sequence_promise, schedule_immediately=True)
+        # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
+        # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
+        await asyncio.sleep(1)
 
-    ctx.reply(history)
-    ctx.reply(cur_interaction_seq.sequence_promise)
-
-    with cur_interaction_seq.append_producer as interaction_appender:
-        async for message_promise in split_messages(ctx.messages, role="assistant"):
-            await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
-
-            # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
-            # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
-            await asyncio.sleep(1)
-
-            message = await message_promise
+        message = await message_promise
+        if str(message).strip():
             try:
                 await telegram_app.bot.send_message(
                     chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
@@ -121,20 +114,20 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
             except telegram.error.BadRequest:
                 await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
 
-            interaction_appender.append(message)
+            ctx.reply(message)
 
-        chat_queue = active_chats[telegram_chat_id]
-        interaction_appender.append(await chat_queue.get())
-        try:
-            # let's give the user a chance to send a follow-up if they forgot something
-            interaction_appender.append(await asyncio.wait_for(chat_queue.get(), timeout=3))
-            while True:
-                # if they did actually send a follow-up, then let's wait for a bit longer
-                interaction_appender.append(await asyncio.wait_for(chat_queue.get(), timeout=15))
-        except asyncio.TimeoutError:
-            # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
-            # response from the Versatilis agent
-            pass
+    chat_queue = active_chats[telegram_chat_id]
+    ctx.reply(await chat_queue.get())
+    try:
+        # let's give the user a chance to send a follow-up if they forgot something
+        ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=3))
+        while True:
+            # if they did actually send a follow-up, then let's wait for a bit longer
+            ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=15))
+    except asyncio.TimeoutError:
+        # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
+        # response from the Versatilis agent
+        pass
 
 
 class TelegramUpdateMessage(Message):

@@ -5,7 +5,7 @@ TODO Oleksandr: figure out the role of this module
 from pathlib import Path
 from typing import Optional
 
-from miniagents.messages import Message
+from miniagents.messages import Message, MessageSequencePromise
 from miniagents.miniagents import miniagent, InteractionContext
 
 from versatilis_config import anthropic_agent
@@ -34,7 +34,6 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
     ctx.reply(
         anthropic_agent.inquire(
             [
-                # "/start",
                 Message(text=system_header, role="system"),
                 full_repo_message,
                 Message(text=system_footer, role="system"),
@@ -91,11 +90,12 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
             last_role = next_role
 
     ctx.reply(history_messages)
+    ctx.reply(ctx.messages)
     ctx.finish_early()  # finish reply sequence early to avoid deadlock between this and calling agent
 
     await current_interaction_to_md(
         chat_history_file=chat_history_file,
-        ctx=ctx,
+        cur_interaction=ctx.messages,
         current_model=current_model,
         history_file_not_empty=history_file_not_empty,
         last_role=last_role,
@@ -104,7 +104,7 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
 
 async def current_interaction_to_md(
     chat_history_file: Path,
-    ctx: InteractionContext,
+    cur_interaction: MessageSequencePromise,
     current_model: str,
     history_file_not_empty: bool,
     last_role: Optional[str],
@@ -113,7 +113,7 @@ async def current_interaction_to_md(
     Append the current interaction to the chat history file.
     """
     with chat_history_file.open("a", encoding="utf-8") as chat_history:
-        async for message_promise in ctx.messages:
+        async for message_promise in cur_interaction:
             message = await message_promise
 
             role = getattr(message, "role", None) or "user"
