@@ -64,12 +64,22 @@ async def on_persist_message(_, message: Message) -> None:
 
     finally:
         if isinstance(message, AnthropicMessage):
-            # TODO Oleksandr: support OpenAIMessage too
+            try:
+                input_token_num = message.usage.input_tokens
+                output_token_num = message.usage.output_tokens
+            except AttributeError:
+                try:
+                    input_token_num = message.usage.prompt_tokens
+                    output_token_num = message.usage.completion_tokens
+                except AttributeError:
+                    input_token_num = None
+                    output_token_num = None
+
             await LangModelGenerationStats.objects.acreate(
                 data_node=data_node,
-                model_name=message.anthropic.model,
-                input_token_num=message.anthropic.usage.input_tokens,
-                output_token_num=message.anthropic.usage.output_tokens,
+                model_name=message.model,
+                input_token_num=input_token_num,
+                output_token_num=output_token_num,
             )
 
         if logger.isEnabledFor(logging.DEBUG):
