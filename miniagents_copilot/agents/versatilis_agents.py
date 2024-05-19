@@ -3,6 +3,7 @@ TODO Oleksandr: figure out the role of this module
 """
 
 from pathlib import Path
+from typing import Optional
 
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
@@ -33,6 +34,7 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
     ctx.reply(
         anthropic_agent.inquire(
             [
+                # "/start",
                 Message(text=system_header, role="system"),
                 full_repo_message,
                 Message(text=system_footer, role="system"),
@@ -60,36 +62,56 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
     """
     TODO Oleksandr: docstring
     """
-    # pylint: disable=too-many-locals
     chat_history_file = agent_folder / "CHAT.md"
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
-    history_md = chat_history_file.read_text(encoding="utf-8")
+    history_messages = []
+    last_role = None
+    if history_file_not_empty:
+        history_md = chat_history_file.read_text(encoding="utf-8")
 
-    messages = []
-    portions = history_md.split("\n-------------------------------\n")
-    for idx, portion in enumerate(portions):
-        if idx == 0:
-            cur_role = portion  # the whole "text portion" is a role
-            continue
+        portions = history_md.split("\n-------------------------------\n")
+        for idx, portion in enumerate(portions):
+            if idx == 0:
+                last_role = portion  # the whole "text portion" is a role
+                continue
 
-        if idx == len(portions) - 1:
-            cur_message = portion  # the whole "text portion" is a message
-            next_role = None
-        else:
-            cur_message, next_role = portion.rsplit("\n", maxsplit=1)
+            if idx == len(portions) - 1:
+                last_message = portion  # the whole "text portion" is a message
+                next_role = last_role  # there is no next role, so we just keep the last one
+            else:
+                last_message, next_role = portion.rsplit("\n", maxsplit=1)
 
-        if cur_role not in ["user", "system"]:
-            cur_role = "assistant"
-        cur_message = cur_message.rstrip()
+            # if it's a model name, we just turn it into "assistant"
+            last_generic_role = last_role if last_role in ["user", "system"] else "assistant"
+            # remove trailing spaces and newlines from the message
+            last_message = last_message.rstrip()
 
-        messages.append(Message(text=cur_message, role=cur_role))
-        cur_role = next_role
+            history_messages.append(Message(text=last_message, role=last_generic_role))
+            last_role = next_role
 
-    ctx.reply(messages)
+    ctx.reply(history_messages)
     ctx.finish_early()  # finish reply sequence early to avoid deadlock between this and calling agent
 
-    last_role = None
+    await current_interaction_to_md(
+        chat_history_file=chat_history_file,
+        ctx=ctx,
+        current_model=current_model,
+        history_file_not_empty=history_file_not_empty,
+        last_role=last_role,
+    )
+
+
+async def current_interaction_to_md(
+    chat_history_file: Path,
+    ctx: InteractionContext,
+    current_model: str,
+    history_file_not_empty: bool,
+    last_role: Optional[str],
+):
+    """
+    Append the current interaction to the chat history file.
+    """
     with chat_history_file.open("a", encoding="utf-8") as chat_history:
         async for message_promise in ctx.messages:
             message = await message_promise
