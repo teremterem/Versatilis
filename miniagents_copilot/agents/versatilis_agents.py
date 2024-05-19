@@ -60,10 +60,33 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
     """
     TODO Oleksandr: docstring
     """
+    # pylint: disable=too-many-locals
     chat_history_file = agent_folder / "CHAT.md"
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
-    ctx.reply(chat_history_file.read_text(encoding="utf-8"))
+    history_md = chat_history_file.read_text(encoding="utf-8")
+
+    messages = []
+    portions = history_md.split("\n-------------------------------\n")
+    for idx, portion in enumerate(portions):
+        if idx == 0:
+            cur_role = portion  # the whole "text portion" is a role
+            continue
+
+        if idx == len(portions) - 1:
+            cur_message = portion  # the whole "text portion" is a message
+            next_role = None
+        else:
+            cur_message, next_role = portion.rsplit("\n", maxsplit=1)
+
+        if cur_role not in ["user", "system"]:
+            cur_role = "assistant"
+        cur_message = cur_message.rstrip()
+
+        messages.append(Message(text=cur_message, role=cur_role))
+        cur_role = next_role
+
+    ctx.reply(messages)
     ctx.finish_early()  # finish reply sequence early to avoid deadlock between this and calling agent
 
     last_role = None
