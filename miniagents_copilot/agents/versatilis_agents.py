@@ -64,7 +64,7 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
     last_role = None
     with chat_history_file.open("w", encoding="utf-8") as chat_history:
         async for message_promise in ctx.messages:
-            message = await message_promise.acollect()
+            message = await message_promise
 
             role = getattr(message, "role", None) or "user"
             if role == "assistant":
