@@ -6,11 +6,11 @@ import logging
 from pprint import pformat
 
 from django.db import models, IntegrityError
-from miniagents.ext.llm.anthropic import AnthropicMessage
+from miniagents.ext.llm.llm_common import LangModelMessage
 from miniagents.messages import Message
 
-from versatilis_config import mini_agents
 from miniagents_copilot.utils import current_time_utc_ms
+from versatilis_config import mini_agents
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +48,14 @@ async def on_persist_message(_, message: Message) -> None:
     Persist Versatilis Messages in the database.
     """
     data_node = None
-    serialized_msg = None
 
     try:
-        serialized_msg = message.serialize()
-        data_node = await DataNode.objects.acreate(
-            hash_key=message.hash_key,
-            node_class=message.class_,
-            payload=serialized_msg,
-        )
+        if getattr(message, "persist_to_db", True):
+            data_node = await DataNode.objects.acreate(
+                hash_key=message.hash_key,
+                node_class=message.class_,
+                payload=message.serialize(),
+            )
 
     except IntegrityError:
         data_node = await DataNode.objects.aget(hash_key=message.hash_key)
@@ -64,13 +63,23 @@ async def on_persist_message(_, message: Message) -> None:
         await data_node.asave(update_fields=["touched_timestamp_ms"])
 
     finally:
-        if isinstance(message, AnthropicMessage):
-            # TODO Oleksandr: support OpenAIMessage too
+        if isinstance(message, LangModelMessage):
+            try:
+                input_token_num = message.usage.input_tokens
+                output_token_num = message.usage.output_tokens
+            except AttributeError:
+                try:
+                    input_token_num = message.usage.prompt_tokens
+                    output_token_num = message.usage.completion_tokens
+                except AttributeError:
+                    input_token_num = None
+                    output_token_num = None
+
             await LangModelGenerationStats.objects.acreate(
                 data_node=data_node,
-                model_name=message.anthropic.model,
-                input_token_num=message.anthropic.usage.input_tokens,
-                output_token_num=message.anthropic.usage.output_tokens,
+                model_name=message.model,
+                input_token_num=input_token_num,
+                output_token_num=output_token_num,
             )
 
         if logger.isEnabledFor(logging.DEBUG):
@@ -78,5 +87,5 @@ async def on_persist_message(_, message: Message) -> None:
                 "COLLECTED: %s\n\n%s\n\n%s\n",
                 message.class_,
                 message.hash_key,
-                pformat(serialized_msg, width=119),
+                pformat(message.serialize(), width=119),
             )

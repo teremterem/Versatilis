@@ -15,7 +15,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agents import soul_crusher
+from miniagents_copilot.agents.versatilis_agents import soul_crusher, history_agent
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ async def telegram_update_agent(ctx: InteractionContext) -> None:
     # noinspection PyBroadException
     try:
         async for message_promise in ctx.messages:
-            message = await message_promise.acollect()
+            message = await message_promise
             update: Update = Update.de_json(message.model_dump(), telegram_app.bot)
             await process_telegram_update(update)
     except Exception:  # pylint: disable=broad-except
@@ -108,6 +108,8 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     #  in the code below)
     ctx.reply(history[:])
 
+    history_agent.inquire(history, schedule_immediately=True)  # TODO Oleksandr: `delegate` instead of `inquire`
+
     with cur_interaction_seq.append_producer as interaction_appender:
         async for message_promise in split_messages(ctx.messages, role="assistant"):
             await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
@@ -116,7 +118,7 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
             # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
             await asyncio.sleep(1)
 
-            message = await message_promise.acollect()
+            message = await message_promise
             try:
                 await telegram_app.bot.send_message(
                     chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
