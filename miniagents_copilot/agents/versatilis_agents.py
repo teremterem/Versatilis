@@ -26,14 +26,23 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: str, model: str
     full_repo_md_file.parent.mkdir(parents=True, exist_ok=True)
     full_repo_md_file.write_text(str(full_repo_message), encoding="utf-8")
 
-    chat_history_file = agent_folder / f"chat-{model}.md"
+    chat_history_file = agent_folder / "CHAT.md"
+    last_role = None
     with chat_history_file.open("w", encoding="utf-8") as chat_history:
         async for message_promise in ctx.messages:
             message = await message_promise.acollect()
-            role = getattr(message, "role", None) or "user"
 
-            chat_history.write(f"{role.upper()}\n-------------------------------\n\n")
-            chat_history.write(f"{message}\n\n\n")
+            role = getattr(message, "role", None) or "user"
+            if role == "assistant":
+                role = model
+
+            if role != last_role:
+                if last_role is not None:
+                    chat_history.write("\n")
+                chat_history.write(f"{role}\n-------------------------------")
+                last_role = role
+
+            chat_history.write(f"\n{message}\n")
 
     ctx.reply(
         anthropic_agent.inquire(
