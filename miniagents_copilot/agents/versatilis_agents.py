@@ -12,8 +12,13 @@ from versatilis_config import anthropic_agent
 BASE_SETUP_FOLDER = Path("../talk-about-miniagents")
 SOUL_CRUSHER_FOLDER = BASE_SETUP_FOLDER / "soul-crusher"
 
+# MODEL = "gpt-4o-2024-05-13"
+# MODEL = "claude-3-opus-20240229"
+# MODEL = "claude-3-sonnet-20240229"
+MODEL = "claude-3-haiku-20240307"
 
-async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, model: str) -> None:
+
+async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
     """
     MiniAgent that receives the complete content of the MiniAgents project in its prompt.
     """
@@ -33,7 +38,7 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, model: st
                 Message(text=system_footer, role="system"),
                 ctx.messages,
             ],
-            model=model,
+            model=current_model,
             max_tokens=1500,
             temperature=0.0,
         )
@@ -43,15 +48,15 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, model: st
 soul_crusher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=SOUL_CRUSHER_FOLDER,
-    model="claude-3-haiku-20240307",
-    # model="claude-3-sonnet-20240229",
-    # model="claude-3-opus-20240229",
-    # model="gpt-4o-2024-05-13",
+    current_model=MODEL,
 )
 
 
-@miniagent(agent_folder=SOUL_CRUSHER_FOLDER)
-async def history_agent(ctx: InteractionContext, agent_folder: Path) -> None:
+@miniagent(
+    agent_folder=SOUL_CRUSHER_FOLDER,
+    current_model=MODEL,  # TODO Oleksandr: fix `split_messages()` so `model` could be read from resulting messages
+)
+async def history_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
     """
     TODO Oleksandr: docstring
     """
@@ -63,13 +68,7 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path) -> None:
 
             role = getattr(message, "role", None) or "user"
             if role == "assistant":
-                try:
-                    role = message.openai.model
-                except AttributeError:
-                    try:
-                        role = message.anthropic.model
-                    except AttributeError:
-                        pass
+                role = current_model
 
             if role != last_role:
                 if last_role is not None:
