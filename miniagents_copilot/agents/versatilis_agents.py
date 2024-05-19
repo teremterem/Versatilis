@@ -61,8 +61,13 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
     TODO Oleksandr: docstring
     """
     chat_history_file = agent_folder / "CHAT.md"
+    history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
+
+    ctx.reply(chat_history_file.read_text(encoding="utf-8"))
+    ctx.finish_early()  # finish reply sequence early to avoid deadlock between this and calling agent
+
     last_role = None
-    with chat_history_file.open("w", encoding="utf-8") as chat_history:
+    with chat_history_file.open("a", encoding="utf-8") as chat_history:
         async for message_promise in ctx.messages:
             message = await message_promise
 
@@ -71,8 +76,11 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
                 role = current_model
 
             if role != last_role:
-                if last_role is not None:
+                if history_file_not_empty:
                     chat_history.write("\n")
+                else:
+                    history_file_not_empty = True
+
                 chat_history.write(f"{role}\n-------------------------------")
                 last_role = role
 

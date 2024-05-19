@@ -7,7 +7,7 @@ import logging
 from functools import partial
 
 import telegram.error
-from miniagents.messages import Message, MessageType
+from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
 from miniagents.promising.sentinels import AWAIT
 from miniagents.utils import achain_loop, split_messages
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 active_chats: dict[int, asyncio.Queue] = {}
-chat_histories: dict[int, list[MessageType]] = {}
 
 
 @miniagent
@@ -98,17 +97,13 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    history = chat_histories.setdefault(telegram_chat_id, [])
     cur_interaction_seq = MessageSequence()
 
-    history.append(cur_interaction_seq.sequence_promise)
-    # TODO Oleksandr: implement a utility in MiniAgents that deep-copies/freezes mutable data containers
-    #  while keeping objects of other types intact and use it in AppendProducer to freeze the state of those
-    #  objects upon their submission (this way the user will not have to worry about things like `history[:]`
-    #  in the code below)
-    ctx.reply(history[:])
+    # TODO Oleksandr: `delegate` instead of `inquire` ?
+    history = history_agent.inquire(cur_interaction_seq.sequence_promise, schedule_immediately=True)
 
-    history_agent.inquire(history, schedule_immediately=True)  # TODO Oleksandr: `delegate` instead of `inquire`
+    ctx.reply(history)
+    ctx.reply(cur_interaction_seq.sequence_promise)
 
     with cur_interaction_seq.append_producer as interaction_appender:
         async for message_promise in split_messages(ctx.messages, role="assistant"):
