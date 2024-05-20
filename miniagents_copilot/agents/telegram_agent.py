@@ -8,7 +8,7 @@ from functools import partial
 
 import telegram.error
 from miniagents.messages import Message
-from miniagents.miniagents import miniagent, InteractionContext
+from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
 from miniagents.promising.sentinels import AWAIT, CLEAR
 from miniagents.utils import achain_loop, split_messages
 from telegram import Update
@@ -59,17 +59,14 @@ async def process_telegram_update(update: Update) -> None:
             try:
                 await achain_loop(
                     agents=[
-                        CLEAR,  # the whole dialog is in the history file anyway, no need to pass it around
+                        CLEAR,  # whole dialog (including current exchange) will be read from history file in next step
                         fetch_history_agent,  # this agent spews out full chat history including current interaction
                         soul_crusher,  # this agent spews out only its own response
                         echo_to_console,
-                        append_history_agent,
                         partial(
                             user_agent.inquire,  # the following agent spews out only user input and nothing else
                             telegram_chat_id=update.effective_chat.id,
                         ),
-                        AWAIT,
-                        append_history_agent,
                         AWAIT,
                     ],
                 )
@@ -105,34 +102,50 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    async for message_promise in split_messages(ctx.messages, role="assistant"):
-        await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
+    reply_seq = MessageSequence()
+    ctx.reply(reply_seq.sequence_promise)
 
-        # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
-        # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
-        await asyncio.sleep(1)
-
-        message = await message_promise
-        if str(message).strip():
-            try:
-                await telegram_app.bot.send_message(
-                    chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
-                )
-            except telegram.error.BadRequest:
-                await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
-
-    chat_queue = active_chats[telegram_chat_id]
-    ctx.reply(await chat_queue.get())
+    incoming_messages = split_messages(ctx.messages, role="assistant")
+    history_done = append_history_agent.inquire(
+        [
+            incoming_messages,
+            reply_seq.sequence_promise,
+        ]
+    )
     try:
-        # let's give the user a chance to send a follow-up if they forgot something
-        ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=3))
-        while True:
-            # if they did actually send a follow-up, then let's wait for a bit longer
-            ctx.reply(await asyncio.wait_for(chat_queue.get(), timeout=15))
-    except asyncio.TimeoutError:
-        # if timeout happens we just finish the function - the user is done sending messages and is waiting for a
-        # response from the Versatilis agent
-        pass
+        async for message_promise in incoming_messages:
+            await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
+
+            # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
+            # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
+            await asyncio.sleep(1)
+
+            message = await message_promise
+            if str(message).strip():
+                try:
+                    await telegram_app.bot.send_message(
+                        chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
+                    )
+                except telegram.error.BadRequest:
+                    await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
+
+        chat_queue = active_chats[telegram_chat_id]
+
+        with reply_seq.append_producer:  # TODO Oleksandr: why don't I see exception when I forget `with` block here ?
+            reply_seq.append_producer.append(await chat_queue.get())
+            try:
+                # let's give the user a chance to send a follow-up if they forgot something
+                reply_seq.append_producer.append(await asyncio.wait_for(chat_queue.get(), timeout=3))
+                while True:
+                    # if they did actually send a follow-up, then let's wait for a bit longer
+                    reply_seq.append_producer.append(await asyncio.wait_for(chat_queue.get(), timeout=15))
+            except asyncio.TimeoutError:
+                # if timeout happens we just finish the function - the user is done sending messages and is waiting
+                # for a response from the Versatilis agent
+                pass
+
+    finally:
+        await history_done.acollect_messages()
 
 
 class TelegramUpdateMessage(Message):
