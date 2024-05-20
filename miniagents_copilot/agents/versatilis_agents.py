@@ -3,9 +3,8 @@ TODO Oleksandr: figure out the role of this module
 """
 
 from pathlib import Path
-from typing import Optional
 
-from miniagents.messages import Message, MessageSequencePromise
+from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
 from versatilis_config import anthropic_agent
@@ -53,11 +52,8 @@ soul_crusher = miniagent(
 )
 
 
-@miniagent(
-    agent_folder=SOUL_CRUSHER_FOLDER,
-    current_model=MODEL,  # TODO Oleksandr: fix `split_messages()` so `model` could be read from resulting messages
-)
-async def history_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
+@miniagent(agent_folder=SOUL_CRUSHER_FOLDER)
+async def fetch_history_agent(ctx: InteractionContext, agent_folder: Path) -> None:
     """
     TODO Oleksandr: docstring
     """
@@ -65,11 +61,11 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
     history_messages = []
-    last_role = None
     if history_file_not_empty:
         history_md = chat_history_file.read_text(encoding="utf-8")
 
         portions = history_md.split("\n-------------------------------\n")
+        last_role = None
         for idx, portion in enumerate(portions):
             if idx == 0:
                 last_role = portion  # the whole "text portion" is a role
@@ -91,30 +87,27 @@ async def history_agent(ctx: InteractionContext, agent_folder: Path, current_mod
 
     ctx.reply(history_messages)
     ctx.reply(ctx.messages)
-    ctx.finish_early()  # finish reply sequence early to avoid deadlock between this and calling agent
-
-    await current_interaction_to_md(
-        chat_history_file=chat_history_file,
-        cur_interaction=ctx.messages,
-        current_model=current_model,
-        history_file_not_empty=history_file_not_empty,
-        last_role=last_role,
-    )
 
 
-async def current_interaction_to_md(
-    chat_history_file: Path,
-    cur_interaction: MessageSequencePromise,
-    current_model: str,
-    history_file_not_empty: bool,
-    last_role: Optional[str],
-):
+@miniagent(
+    agent_folder=SOUL_CRUSHER_FOLDER,
+    current_model=MODEL,  # TODO Oleksandr: fix `split_messages()` so `model` could be read from resulting messages ?
+)
+async def append_history_agent(ctx: InteractionContext, agent_folder: Path, current_model: str):
     """
-    Append the current interaction to the chat history file.
+    TODO Oleksandr: docstring
     """
+    ctx.reply(ctx.messages)  # just pass the same input messages forward (before saving them to the history file)
+
+    chat_history_file = agent_folder / "CHAT.md"
+    history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
+
+    last_role = None
     with chat_history_file.open("a", encoding="utf-8") as chat_history:
-        async for message_promise in cur_interaction:
+        async for message_promise in ctx.messages:
             message = await message_promise
+            if not str(message).strip():
+                continue
 
             role = getattr(message, "role", None) or "user"
             if role == "assistant":

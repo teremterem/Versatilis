@@ -9,13 +9,13 @@ from functools import partial
 import telegram.error
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
-from miniagents.promising.sentinels import AWAIT
+from miniagents.promising.sentinels import AWAIT, CLEAR
 from miniagents.utils import achain_loop, split_messages
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agents import soul_crusher, history_agent
+from miniagents_copilot.agents.versatilis_agents import soul_crusher, fetch_history_agent, append_history_agent
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -59,11 +59,18 @@ async def process_telegram_update(update: Update) -> None:
             try:
                 await achain_loop(
                     agents=[
-                        history_agent,
-                        AWAIT,
-                        soul_crusher,
+                        CLEAR,  # the whole dialog is in the history file anyway, no need to pass it around
+                        fetch_history_agent,  # this agent spews out full chat history including current interaction
+                        soul_crusher,  # this agent spews out only its own response
                         echo_to_console,
-                        partial(user_agent.inquire, telegram_chat_id=update.effective_chat.id),
+                        append_history_agent,
+                        partial(
+                            user_agent.inquire,  # the following agent spews out only user input and nothing else
+                            telegram_chat_id=update.effective_chat.id,
+                        ),
+                        AWAIT,
+                        append_history_agent,
+                        AWAIT,
                     ],
                 )
             except Exception as exc:  # pylint: disable=broad-except
@@ -113,8 +120,6 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
                 )
             except telegram.error.BadRequest:
                 await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
-
-            ctx.reply(message)
 
     chat_queue = active_chats[telegram_chat_id]
     ctx.reply(await chat_queue.get())
