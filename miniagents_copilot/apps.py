@@ -2,11 +2,12 @@
 App configuration for miniagents_copilot Django app.
 """
 
+import asyncio
 import logging
 
 from django.apps import AppConfig
 
-from miniagents_copilot.agents.telegram_agent import telegram_app
+from miniagents_copilot.agents.telegram_agent import telegram_app, telegram_chain_loop
 from versatilis_config import mini_agents, TELEGRAM_TOKEN, WEBHOOK_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -39,5 +40,8 @@ class MiniAgentsCopilotConfig(AppConfig):
             logger.info("MiniAgentsCopilotConfig.ready() - telegram bot webhook set")
 
         mini_agents.schedule_task(_init_telegram_bot())
+
+        # start the agent loop
+        asyncio.create_task(telegram_chain_loop())
 
         logger.info("MiniAgentsCopilotConfig.ready() - exited")

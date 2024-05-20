@@ -4,7 +4,7 @@ A MiniAgent that is connected to a Telegram bot.
 
 import asyncio
 import logging
-from functools import partial
+from typing import AsyncIterable
 
 import telegram.error
 from miniagents.messages import Message
@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 telegram_app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-active_chats: dict[int, asyncio.Queue] = {}
+telegram_input_queue = asyncio.Queue()
+LAST_TELEGRAM_CHAT_ID = None
 
 
 @miniagent
@@ -44,45 +45,35 @@ async def process_telegram_update(update: Update) -> None:
     """
     Process a Telegram update.
     """
-    if not update.effective_message or not update.effective_message.text:
+    global LAST_TELEGRAM_CHAT_ID  # pylint: disable=global-statement
+
+    if not update.effective_message or not update.effective_message.text or update.edited_message:
         return
 
-    if update.edited_message:
-        # TODO Oleksandr: update the history when messages are edited
-        return
+    LAST_TELEGRAM_CHAT_ID = update.effective_chat.id
+    await telegram_input_queue.put(update.effective_message.text)
 
-    if update.effective_message.text == "/start":
-        if update.effective_chat.id not in active_chats:
-            # Start a conversation if it is not already started.
-            # The following function will not return until the conversation is over (and it is never over :D)
-            active_chats[update.effective_chat.id] = asyncio.Queue()
-            try:
-                await achain_loop(
-                    agents=[
-                        CLEAR,  # whole dialog (including current exchange) will be read from history file in next step
-                        fetch_history_agent,  # this agent spews out full chat history including current interaction
-                        soul_crusher,  # this agent spews out only its own response
-                        echo_to_console,
-                        partial(
-                            user_agent.inquire,  # the following agent spews out only user input and nothing else
-                            telegram_chat_id=update.effective_chat.id,
-                        ),
-                        AWAIT,
-                    ],
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                logger.exception("ERROR IN THE CONVERSATION LOOP")
-                await update.effective_chat.send_message("Sorry, something went wrong 🤖")
-                await update.effective_chat.send_message(str(exc))
 
-        return
-
-    if update.effective_chat.id not in active_chats:
-        # conversation is not started yet
-        return
-
-    queue = active_chats[update.effective_chat.id]
-    await queue.put(update.effective_message.text)
+async def telegram_chain_loop() -> None:
+    """
+    The main Telegram agent loop.
+    """
+    try:
+        # The following function will not return until the conversation is over (and it is never over :D)
+        await achain_loop(
+            agents=[
+                user_agent,  # the following agent spews out only user input and nothing else
+                AWAIT,
+                CLEAR,  # whole dialog (including current exchange) will be read from history file in next step
+                fetch_history_agent,  # this agent spews out full chat history including current interaction
+                soul_crusher,  # this agent spews out only its own response
+                echo_to_console,
+            ],
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("ERROR IN THE CONVERSATION LOOP")
+        await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text="Sorry, something went wrong 🤖")
+        await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text=str(exc))
 
 
 @miniagent
@@ -97,7 +88,7 @@ async def echo_to_console(ctx: InteractionContext) -> None:
 
 
 @miniagent
-async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
+async def user_agent(ctx: InteractionContext) -> None:
     """
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
@@ -114,38 +105,52 @@ async def user_agent(ctx: InteractionContext, telegram_chat_id: int) -> None:
     )
     try:
         async for message_promise in incoming_messages:
-            await telegram_app.bot.send_chat_action(telegram_chat_id, "typing")
+            if LAST_TELEGRAM_CHAT_ID is not None:
+                await telegram_app.bot.send_chat_action(LAST_TELEGRAM_CHAT_ID, "typing")
 
-            # it's ok to sleep asynchronously, because the message tokens will be collected in the background anyway,
-            # thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
+            # it's ok to sleep asynchronously, because the message tokens will be collected in the background
+            # anyway, thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
             await asyncio.sleep(1)
 
             message = await message_promise
             if str(message).strip():
                 try:
                     await telegram_app.bot.send_message(
-                        chat_id=telegram_chat_id, text=str(message), parse_mode=ParseMode.MARKDOWN
+                        chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message), parse_mode=ParseMode.MARKDOWN
                     )
                 except telegram.error.BadRequest:
-                    await telegram_app.bot.send_message(chat_id=telegram_chat_id, text=str(message))
+                    await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message))
 
-        chat_queue = active_chats[telegram_chat_id]
-
-        with reply_seq.append_producer:  # TODO Oleksandr: why don't I see exception when I forget `with` block here ?
-            reply_seq.append_producer.append(await chat_queue.get())
-            try:
-                # let's give the user a chance to send a follow-up if they forgot something
-                reply_seq.append_producer.append(await asyncio.wait_for(chat_queue.get(), timeout=3))
-                while True:
-                    # if they did actually send a follow-up, then let's wait for a bit longer
-                    reply_seq.append_producer.append(await asyncio.wait_for(chat_queue.get(), timeout=15))
-            except asyncio.TimeoutError:
-                # if timeout happens we just finish the function - the user is done sending messages and is waiting
-                # for a response from the Versatilis agent
-                pass
+        with reply_seq.append_producer:
+            async for user_input in get_user_inputs():
+                if user_input == "/start":
+                    # /start command means that we want to force a response from the agent - so we break the user input
+                    # loop and let the agent respond
+                    break
+                reply_seq.append_producer.append(user_input)
 
     finally:
+        # TODO TODO TODO Oleksandr: the following operator causes the exceptions from this agent to never go into
+        #  the agent's response and just stay invisible. Solution: log agent exceptions in MiniAgents framework
+        #  (MAYBE EVEN AT THE `PROMISE` LEVEL)
         await history_done.acollect_messages()
+
+
+async def get_user_inputs() -> AsyncIterable[str]:
+    """
+    Get user inputs from the Telegram input queue. Do "smart waiting" if the user sends quick follow-ups.
+    """
+    yield await telegram_input_queue.get()
+    try:
+        # let's give the user a chance to send a follow-up if they forgot something
+        yield await asyncio.wait_for(telegram_input_queue.get(), timeout=3)
+        while True:
+            # if they did actually send a follow-up, then let's wait for a bit longer
+            yield await asyncio.wait_for(telegram_input_queue.get(), timeout=15)
+    except asyncio.TimeoutError:
+        # if timeout happens we just finish the function - the user is done sending messages and is waiting
+        # for a response from the Versatilis agent
+        pass
 
 
 class TelegramUpdateMessage(Message):
