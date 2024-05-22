@@ -68,7 +68,7 @@ async def fetch_history_agent(ctx: InteractionContext, agent_folder: Path) -> No
         last_role = None
         for idx, portion in enumerate(portions):
             if idx == 0:
-                last_role = portion  # the whole "text portion" is a role
+                last_role = portion.rsplit("\n", maxsplit=1)[-1]
                 continue
 
             if idx == len(portions) - 1:

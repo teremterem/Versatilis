@@ -93,7 +93,7 @@ async def user_agent(ctx: InteractionContext) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    reply_seq = MessageSequence()
+    reply_seq = MessageSequence(producer_capture_errors=True)
     ctx.reply(reply_seq.sequence_promise)
 
     incoming_messages = split_messages(ctx.messages, role="assistant")
@@ -103,7 +103,7 @@ async def user_agent(ctx: InteractionContext) -> None:
             reply_seq.sequence_promise,
         ]
     )
-    try:
+    with reply_seq.append_producer:
         async for message_promise in incoming_messages:
             if LAST_TELEGRAM_CHAT_ID is not None:
                 await telegram_app.bot.send_chat_action(LAST_TELEGRAM_CHAT_ID, "typing")
@@ -121,19 +121,14 @@ async def user_agent(ctx: InteractionContext) -> None:
                 except telegram.error.BadRequest:
                     await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message))
 
-        with reply_seq.append_producer:
-            async for user_input in get_user_inputs():
-                if user_input == "/start":
-                    # /start command means that we want to force a response from the agent - so we break the user input
-                    # loop and let the agent respond
-                    break
-                reply_seq.append_producer.append(user_input)
+        async for user_input in get_user_inputs():
+            if user_input == "/start":
+                # /start command means that we want to force a response from the agent - so we break the user input
+                # loop and let the agent respond
+                break
+            reply_seq.append_producer.append(user_input)
 
-    finally:
-        # TODO TODO TODO Oleksandr: the following operator causes the exceptions from this agent to never go into
-        #  the agent's response and just stay invisible. Solution: log agent exceptions in MiniAgents framework
-        #  (MAYBE EVEN AT THE `PROMISE` LEVEL)
-        await history_done.acollect_messages()
+    await history_done.acollect_messages()
 
 
 async def get_user_inputs() -> AsyncIterable[str]:
