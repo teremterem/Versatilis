@@ -7,31 +7,30 @@ from pathlib import Path
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
-from versatilis_config import anthropic_agent
+from versatilis_config import openai_agent
 
-BASE_SETUP_FOLDER = Path("../talk-about-miniagents")
-SOUL_CRUSHER_FOLDER = BASE_SETUP_FOLDER / "soul-crusher"
+BASE_SETUP_FOLDER = (Path(__file__).parent / "../../../talk-about-miniagents").resolve()
 
-# MODEL = "gpt-4o-2024-05-13"
-# MODEL = "claude-3-opus-20240229"
+# MODEL = "claude-3-haiku-20240307"
 # MODEL = "claude-3-sonnet-20240229"
-MODEL = "claude-3-haiku-20240307"
+# MODEL = "claude-3-opus-20240229"
+MODEL = "gpt-4o-2024-05-13"
 
 
 async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
     """
     MiniAgent that receives the complete content of the MiniAgents project in its prompt.
     """
-    system_header = (agent_folder / "setup/system-header.md").read_text(encoding="utf-8")
-    system_footer = (agent_folder / "setup/system-footer.md").read_text(encoding="utf-8")
+    system_header = (agent_folder / "system-header.md").read_text(encoding="utf-8")
+    system_footer = (agent_folder / "system-footer.md").read_text(encoding="utf-8")
 
     full_repo_message = FullRepoMessage.create()
-    full_repo_md_file = agent_folder / "transient/full-repo.md"
+    full_repo_md_file = BASE_SETUP_FOLDER / "transient/full-repo.md"
     full_repo_md_file.parent.mkdir(parents=True, exist_ok=True)
     full_repo_md_file.write_text(str(full_repo_message), encoding="utf-8")
 
     ctx.reply(
-        anthropic_agent.inquire(
+        openai_agent.inquire(
             [
                 Message(text=system_header, role="system"),
                 full_repo_message,
@@ -47,17 +46,17 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
 
 soul_crusher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
-    agent_folder=SOUL_CRUSHER_FOLDER,
+    agent_folder=BASE_SETUP_FOLDER / "soul-crusher",
     current_model=MODEL,
 )
 
 
-@miniagent(agent_folder=SOUL_CRUSHER_FOLDER)
-async def fetch_history_agent(ctx: InteractionContext, agent_folder: Path) -> None:
+@miniagent
+async def fetch_history_agent(ctx: InteractionContext) -> None:
     """
     TODO Oleksandr: docstring
     """
-    chat_history_file = agent_folder / "CHAT.md"
+    chat_history_file = BASE_SETUP_FOLDER / "CHAT.md"
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
     history_messages = []
@@ -90,16 +89,15 @@ async def fetch_history_agent(ctx: InteractionContext, agent_folder: Path) -> No
 
 
 @miniagent(
-    agent_folder=SOUL_CRUSHER_FOLDER,
     current_model=MODEL,  # TODO Oleksandr: fix `split_messages()` so `model` could be read from resulting messages ?
 )
-async def append_history_agent(ctx: InteractionContext, agent_folder: Path, current_model: str):
+async def append_history_agent(ctx: InteractionContext, current_model: str):
     """
     TODO Oleksandr: docstring
     """
     ctx.reply(ctx.messages)  # just pass the same input messages forward (before saving them to the history file)
 
-    chat_history_file = agent_folder / "CHAT.md"
+    chat_history_file = BASE_SETUP_FOLDER / "CHAT.md"
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
     last_role = None
