@@ -54,7 +54,17 @@ documenter = miniagent(
     agent_folder=BASE_SETUP_FOLDER / "documenter",
     current_model=MODEL,
 )
-versatilis_agent = documenter
+researcher = miniagent(
+    full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
+    agent_folder=BASE_SETUP_FOLDER / "researcher",
+    current_model=MODEL,
+)
+research_planner = miniagent(
+    full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
+    agent_folder=BASE_SETUP_FOLDER / "research-planner",
+    current_model=MODEL,
+)
+versatilis_agent = research_planner
 
 
 class RepoFileMessage(Message):
