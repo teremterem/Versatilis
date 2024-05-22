@@ -15,7 +15,8 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
-from miniagents_copilot.agents.versatilis_agents import soul_crusher, fetch_history_agent, append_history_agent
+from miniagents_copilot.agents.history_agents import fetch_history_agent, append_history_agent
+from miniagents_copilot.agents.versatilis_agents import versatilis_agent
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ async def telegram_chain_loop() -> None:
                 AWAIT,
                 CLEAR,  # whole dialog (including current exchange) will be read from history file in next step
                 fetch_history_agent,  # this agent spews out full chat history including current interaction
-                soul_crusher,  # this agent spews out only its own response
+                versatilis_agent,  # this agent spews out only its own response
                 echo_to_console,
             ],
         )

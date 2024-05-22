@@ -7,7 +7,7 @@ import logging
 
 from django.apps import AppConfig
 
-from miniagents_copilot.agents.telegram_agent import telegram_app, telegram_chain_loop
+from miniagents_copilot.agents.telegram_agents import telegram_app, telegram_chain_loop
 from versatilis_config import mini_agents, TELEGRAM_TOKEN, WEBHOOK_BASE_URL
 
 logger = logging.getLogger(__name__)
