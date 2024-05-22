@@ -93,6 +93,8 @@ async def user_agent(ctx: InteractionContext) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
+    # TODO TODO TODO Oleksandr: the users of the library should not interact with the components of the `promising`
+    #  part of the library directly - too easy to introduce deadlocks.
     reply_seq = MessageSequence(producer_capture_errors=True)
     ctx.reply(reply_seq.sequence_promise)
 
