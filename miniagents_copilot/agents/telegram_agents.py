@@ -8,7 +8,7 @@ from typing import AsyncIterable
 
 import telegram.error
 from miniagents.messages import Message
-from miniagents.miniagents import miniagent, InteractionContext, MessageSequence
+from miniagents.miniagents import miniagent, InteractionContext
 from miniagents.promising.sentinels import AWAIT, CLEAR
 from miniagents.utils import achain_loop, split_messages
 from telegram import Update
@@ -94,44 +94,52 @@ async def user_agent(ctx: InteractionContext) -> None:
     This is a proxy agent that represents the user in the conversation loop. It is also responsible for maintaining
     the chat history.
     """
-    # TODO TODO TODO Oleksandr: the users of the library should not interact with the components of the `promising`
-    #  part of the library directly - too easy to introduce deadlocks.
-    reply_seq = MessageSequence(producer_capture_errors=True)
-    ctx.reply(reply_seq.sequence_promise)
+    versatilis_output = split_messages(ctx.messages, role="assistant")
+    telegram_input = telegram_user_agent.inquire(versatilis_output)
 
-    incoming_messages = split_messages(ctx.messages, role="assistant")
-    history_done = append_history_agent.inquire(
+    ctx.reply(telegram_input)
+
+    # append the user input to the chat history and wait until the append operation is done
+    await append_history_agent.inquire(
         [
-            incoming_messages,
-            reply_seq.sequence_promise,
+            versatilis_output,
+            telegram_input,
         ]
-    )
-    with reply_seq.append_producer:
-        async for message_promise in incoming_messages:
-            if LAST_TELEGRAM_CHAT_ID is not None:
-                await telegram_app.bot.send_chat_action(LAST_TELEGRAM_CHAT_ID, "typing")
+    ).acollect_messages()
 
-            # it's ok to sleep asynchronously, because the message tokens will be collected in the background
-            # anyway, thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
-            await asyncio.sleep(1)
 
-            message = await message_promise
-            if str(message).strip():
-                try:
-                    await telegram_app.bot.send_message(
-                        chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message), parse_mode=ParseMode.MARKDOWN
-                    )
-                except telegram.error.BadRequest:
-                    await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message))
+@miniagent
+async def telegram_user_agent(ctx: InteractionContext) -> None:
+    """
+    Integration of Telegram as an input channel.
+    """
+    # send Versatilis messages to Telegram
 
-        async for user_input in get_user_inputs():
-            if user_input == "/start":
-                # /start command means that we want to force a response from the agent - so we break the user input
-                # loop and let the agent respond
-                break
-            reply_seq.append_producer.append(user_input)
+    async for message_promise in ctx.messages:
+        if LAST_TELEGRAM_CHAT_ID is not None:
+            await telegram_app.bot.send_chat_action(LAST_TELEGRAM_CHAT_ID, "typing")
 
-    await history_done.acollect_messages()
+        # it's ok to sleep asynchronously, because the message tokens will be collected in the background
+        # anyway, thanks to the way `MiniAgents` (or, more specifically, `promising`) framework is designed
+        await asyncio.sleep(1)
+
+        message = await message_promise
+        if str(message).strip():
+            try:
+                await telegram_app.bot.send_message(
+                    chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message), parse_mode=ParseMode.MARKDOWN
+                )
+            except telegram.error.BadRequest:
+                await telegram_app.bot.send_message(chat_id=LAST_TELEGRAM_CHAT_ID, text=str(message))
+
+    # receive user responses to Versatilis messages (aka user inputs)
+
+    async for user_input in get_user_inputs():
+        if user_input == "/start":
+            # /start command means that we want to force a response from the agent - so we break the user input
+            # loop and let the agent respond
+            break
+        ctx.reply(user_input)
 
 
 async def get_user_inputs() -> AsyncIterable[str]:
