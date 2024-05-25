@@ -64,7 +64,39 @@ research_planner = miniagent(
     agent_folder=BASE_SETUP_FOLDER / "research-planner",
     current_model=MODEL,
 )
-versatilis_agent = research_planner
+answerer = miniagent(
+    full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
+    agent_folder=BASE_SETUP_FOLDER / "answerer",
+    current_model=MODEL,
+)
+versatilis_agent = researcher
+
+
+@miniagent
+async def role_inversion_agent(ctx: InteractionContext) -> None:
+    """
+    MiniAgent that inverts roles of incoming messages and replies with them.
+    """
+    async for message_promise in ctx.messages:
+        # TODO Oleksandr: how to influence message attributes without breaking the token stream with this await ?
+        #  (try to accomplish it right here with the tools you already have first, before introducing new ones)
+        message = await message_promise
+        if getattr(message, "role", None) in ["user", "assistant"]:
+            message = Message(
+                # TODO Oleksandr: this looks cumbersome
+                **message.model_dump(exclude={"role"}),
+                role="assistant" if message.role == "user" else "user",
+            )
+        ctx.reply(message)
+
+
+@miniagent
+async def versatilis_answerer(ctx: InteractionContext) -> None:
+    """
+    While researcher agent asks questions, answerer agent tries to answer them instead of the user (it sees the
+    roles in the message history as inverted).
+    """
+    ctx.reply(answerer.inquire(role_inversion_agent.inquire(ctx.messages)))
 
 
 class RepoFileMessage(Message):
