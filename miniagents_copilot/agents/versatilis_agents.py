@@ -7,6 +7,7 @@ from pathlib import Path
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
+from miniagents_copilot.agents.history_agents import fetch_history
 from versatilis_config import openai_agent
 
 BASE_SETUP_FOLDER = (Path(__file__).parent / "../../../talk-about-miniagents").resolve()
@@ -69,7 +70,24 @@ answerer = miniagent(
     agent_folder=BASE_SETUP_FOLDER / "answerer",
     current_model=MODEL,
 )
-versatilis_agent = researcher
+
+
+@miniagent
+async def versatilis_agent(ctx: InteractionContext) -> None:
+    """
+    The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
+    """
+    ctx.reply(researcher.inquire(ctx.messages))
+
+
+@miniagent
+async def versatilis_answerer(ctx: InteractionContext) -> None:
+    """
+    While researcher agent asks questions, answerer agent tries to answer them instead of the user (it sees the
+    roles in the message history as inverted).
+    """
+    chat_history = await fetch_history(file_name="CHAT.md")
+    ctx.reply(answerer.inquire(role_inversion_agent.inquire(chat_history)))
 
 
 @miniagent
@@ -88,15 +106,6 @@ async def role_inversion_agent(ctx: InteractionContext) -> None:
                 role="assistant" if message.role == "user" else "user",
             )
         ctx.reply(message)
-
-
-@miniagent
-async def versatilis_answerer(ctx: InteractionContext) -> None:
-    """
-    While researcher agent asks questions, answerer agent tries to answer them instead of the user (it sees the
-    roles in the message history as inverted).
-    """
-    ctx.reply(answerer.inquire(role_inversion_agent.inquire(ctx.messages)))
 
 
 class RepoFileMessage(Message):
@@ -148,7 +157,7 @@ class FullRepoMessage(Message):
 
         return "\n\n\n\n".join(
             [
-                f"```\n{miniagent_files_str}\n```",
+                f"File list:```\n{miniagent_files_str}\n```",
                 *[str(file_message) for file_message in self.repo_files],
             ]
         )

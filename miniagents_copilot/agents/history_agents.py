@@ -1,3 +1,4 @@
+# pylint: disable=import-outside-toplevel,cyclic-import
 """
 This module contains agents that are responsible for fetching and appending chat history to `CHAT.md` file.
 """
@@ -5,15 +6,14 @@ This module contains agents that are responsible for fetching and appending chat
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
-from miniagents_copilot.agents.versatilis_agents import BASE_SETUP_FOLDER, MODEL
 
-
-@miniagent
-async def fetch_history_agent(ctx: InteractionContext) -> None:
+async def fetch_history(file_name: str) -> list[Message]:
     """
     TODO Oleksandr: docstring
     """
-    chat_history_file = BASE_SETUP_FOLDER / "CHAT.md"
+    from miniagents_copilot.agents.versatilis_agents import BASE_SETUP_FOLDER
+
+    chat_history_file = BASE_SETUP_FOLDER / file_name
     history_file_not_empty = chat_history_file.exists() and chat_history_file.stat().st_size > 0
 
     history_messages = []
@@ -41,17 +41,16 @@ async def fetch_history_agent(ctx: InteractionContext) -> None:
             history_messages.append(Message(text=last_message, role=last_generic_role))
             last_role = next_role
 
-    ctx.reply(history_messages)
-    ctx.reply(ctx.messages)
+    return history_messages
 
 
-@miniagent(
-    current_model=MODEL,  # TODO Oleksandr: fix `split_messages()` so `model` could be read from resulting messages ?
-)
-async def append_history_agent(ctx: InteractionContext, current_model: str):
+@miniagent
+async def append_history_agent(ctx: InteractionContext):
     """
     TODO Oleksandr: docstring
     """
+    from miniagents_copilot.agents.versatilis_agents import BASE_SETUP_FOLDER, MODEL
+
     ctx.reply(ctx.messages)  # just pass the same input messages forward (before saving them to the history file)
 
     chat_history_file = BASE_SETUP_FOLDER / "CHAT.md"
@@ -66,7 +65,7 @@ async def append_history_agent(ctx: InteractionContext, current_model: str):
 
             role = getattr(message, "role", None) or "user"
             if role == "assistant":
-                role = current_model
+                role = MODEL  # TODO Oleksandr: fix `split_messages()` so `model` could be read from messages ?
 
             if role != last_role:
                 if history_file_not_empty:
