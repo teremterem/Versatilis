@@ -12,6 +12,11 @@ from versatilis_config import openai_agent
 
 BASE_SETUP_FOLDER = (Path(__file__).parent / "../../../talk-about-miniagents").resolve()
 
+ANSWERS_FILE_NAME = "ANSWERS.md"
+
+CHAT_FILE = BASE_SETUP_FOLDER / "CHAT.md"
+ANSWERS_FILE = BASE_SETUP_FOLDER / ANSWERS_FILE_NAME
+
 # MODEL = "claude-3-haiku-20240307"
 # MODEL = "claude-3-sonnet-20240229"
 # MODEL = "claude-3-opus-20240229"
@@ -77,7 +82,23 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
-    ctx.reply(researcher.inquire(ctx.messages))
+    chat_history = await fetch_history(history_file=CHAT_FILE)
+
+    if ANSWERS_FILE.exists():
+        # if answers file exists, then we are in "answerer" mode
+        answers_history = await fetch_history(history_file=ANSWERS_FILE)
+        ctx.reply(
+            researcher.inquire(
+                [
+                    # in the chat history answerer sees assistant as user and user as assistant
+                    role_inversion_agent.inquire(chat_history),
+                    answers_history,  # in the answerer portion of the chat history roles are not flipped
+                ]
+            )
+        )
+    else:
+        # otherwise, we are in "researcher" mode
+        ctx.reply(researcher.inquire(chat_history))
 
 
 @miniagent
@@ -86,8 +107,7 @@ async def versatilis_answerer(ctx: InteractionContext) -> None:
     While researcher agent asks questions, answerer agent tries to answer them instead of the user (it sees the
     roles in the message history as inverted).
     """
-    chat_history = await fetch_history(file_name="CHAT.md")
-    ctx.reply(answerer.inquire(role_inversion_agent.inquire(chat_history)))
+    ctx.reply(answerer.inquire(role_inversion_agent.inquire(ctx.messages)))
 
 
 @miniagent
@@ -157,7 +177,7 @@ class FullRepoMessage(Message):
 
         return "\n\n\n\n".join(
             [
-                f"File list:```\n{miniagent_files_str}\n```",
+                f"File list:\n```\n{miniagent_files_str}\n```",
                 *[str(file_message) for file_message in self.repo_files],
             ]
         )
