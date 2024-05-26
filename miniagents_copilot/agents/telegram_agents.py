@@ -15,7 +15,13 @@ from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder
 
 from miniagents_copilot.agents.history_agents import append_history_agent
-from miniagents_copilot.agents.versatilis_agents import versatilis_agent, CHAT_FILE, MODEL, ANSWERS_FILE
+from miniagents_copilot.agents.versatilis_agents import (
+    versatilis_agent,
+    CHAT_FILE,
+    ANSWERS_FILE,
+    ANSWERER_MODEL,
+    RESEARCHER_MODEL,
+)
 from versatilis_config import TELEGRAM_TOKEN
 
 logger = logging.getLogger(__name__)
@@ -99,8 +105,11 @@ async def user_agent(ctx: InteractionContext) -> None:
 
     if ANSWERS_FILE.exists():
         history_file = ANSWERS_FILE
+        model = ANSWERER_MODEL
     else:
         history_file = CHAT_FILE
+        model = RESEARCHER_MODEL
+
     # append the user input to the chat history and wait until the append operation is done
     await append_history_agent.inquire(
         [
@@ -108,7 +117,7 @@ async def user_agent(ctx: InteractionContext) -> None:
             telegram_input,
         ],
         history_file=history_file,
-        model=MODEL,
+        model=model,
     ).acollect_messages()
 
 

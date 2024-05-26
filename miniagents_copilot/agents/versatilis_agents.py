@@ -17,10 +17,13 @@ ANSWERS_FILE_NAME = "ANSWERS.md"
 CHAT_FILE = BASE_SETUP_FOLDER / "CHAT.md"
 ANSWERS_FILE = BASE_SETUP_FOLDER / ANSWERS_FILE_NAME
 
-# MODEL = "claude-3-haiku-20240307"
-# MODEL = "claude-3-sonnet-20240229"
-# MODEL = "claude-3-opus-20240229"
-MODEL = "gpt-4o-2024-05-13"
+CLAUDE_HAIKU = "claude-3-haiku-20240307"
+CLAUDE_SONNET = "claude-3-sonnet-20240229"
+CLAUDE_OPUS = "claude-3-opus-20240229"
+GPT_4O = "gpt-4o-2024-05-13"
+
+RESEARCHER_MODEL = GPT_4O
+ANSWERER_MODEL = CLAUDE_OPUS
 
 
 async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
@@ -53,27 +56,27 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
 soul_crusher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "soul-crusher",
-    current_model=MODEL,
+    current_model=RESEARCHER_MODEL,
 )
 documenter = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "documenter",
-    current_model=MODEL,
+    current_model=ANSWERER_MODEL,
 )
 researcher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "researcher",
-    current_model=MODEL,
+    current_model=RESEARCHER_MODEL,
 )
 research_planner = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "research-planner",
-    current_model=MODEL,
+    current_model=RESEARCHER_MODEL,
 )
 answerer = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "answerer",
-    current_model=MODEL,
+    current_model=ANSWERER_MODEL,
 )
 
 
