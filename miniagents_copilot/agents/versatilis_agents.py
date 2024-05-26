@@ -21,7 +21,7 @@ CLAUDE_OPUS = "claude-3-opus-20240229"
 GPT_4O = "gpt-4o-2024-05-13"
 
 RESEARCHER_MODEL = GPT_4O
-ANSWERER_MODEL = CLAUDE_OPUS
+ANSWERER_MODEL = GPT_4O
 
 
 async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_model: str) -> None:
