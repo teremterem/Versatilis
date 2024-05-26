@@ -8,14 +8,12 @@ from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
 from miniagents_copilot.agents.history_agents import fetch_history
-from versatilis_config import openai_agent
+from versatilis_config import openai_agent, anthropic_agent
 
 BASE_SETUP_FOLDER = (Path(__file__).parent / "../../../talk-about-miniagents").resolve()
 
-ANSWERS_FILE_NAME = "ANSWERS.md"
-
 CHAT_FILE = BASE_SETUP_FOLDER / "CHAT.md"
-ANSWERS_FILE = BASE_SETUP_FOLDER / ANSWERS_FILE_NAME
+ANSWERS_FILE = BASE_SETUP_FOLDER / "ANSWERS.md"
 
 CLAUDE_HAIKU = "claude-3-haiku-20240307"
 CLAUDE_SONNET = "claude-3-sonnet-20240229"
@@ -38,8 +36,10 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
     full_repo_md_file.parent.mkdir(parents=True, exist_ok=True)
     full_repo_md_file.write_text(str(full_repo_message), encoding="utf-8")
 
+    llm_agent = openai_agent if current_model == GPT_4O else anthropic_agent
+
     ctx.reply(
-        openai_agent.inquire(
+        llm_agent.inquire(
             [
                 Message(text=system_header, role="system"),
                 full_repo_message,
@@ -91,7 +91,7 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
         # if answers file exists, then we are in "answerer" mode
         answers_history = await fetch_history(history_file=ANSWERS_FILE)
         ctx.reply(
-            researcher.inquire(
+            answerer.inquire(
                 [
                     # in the chat history answerer sees assistant as user and user as assistant
                     role_inversion_agent.inquire(chat_history),
@@ -102,15 +102,6 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     else:
         # otherwise, we are in "researcher" mode
         ctx.reply(researcher.inquire(chat_history))
-
-
-@miniagent
-async def versatilis_answerer(ctx: InteractionContext) -> None:
-    """
-    While researcher agent asks questions, answerer agent tries to answer them instead of the user (it sees the
-    roles in the message history as inverted).
-    """
-    ctx.reply(answerer.inquire(role_inversion_agent.inquire(ctx.messages)))
 
 
 @miniagent
