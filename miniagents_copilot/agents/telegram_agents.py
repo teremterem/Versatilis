@@ -4,7 +4,6 @@ A MiniAgent that is connected to a Telegram bot.
 
 import asyncio
 import logging
-from typing import AsyncIterable
 
 import telegram.error
 from miniagents.messages import Message
@@ -139,29 +138,16 @@ async def telegram_user_agent(ctx: InteractionContext) -> None:
 
     # receive user responses to Versatilis messages (aka user inputs)
 
-    async for user_input in get_user_inputs():
-        if user_input == "/start":
-            # /start command means that we want to force a response from the agent - so we break the user input
-            # loop and let the agent respond
-            break
+    while True:
+        user_input = await telegram_input_queue.get()
+        if user_input == "/answerer":
+            # move the assistant to the "answerer" mode
+            if not ANSWERS_FILE.exists():
+                ANSWERS_FILE.write_text("", encoding="utf-8")
+            break  # stop waiting for any more user inputs and let the assistant respond
+        if user_input in ["/start", "go", "Go"]:
+            break  # stop waiting for any more user inputs and let the assistant respond
         ctx.reply(user_input)
-
-
-async def get_user_inputs() -> AsyncIterable[str]:
-    """
-    Get user inputs from the Telegram input queue. Do "smart waiting" if the user sends quick follow-ups.
-    """
-    yield await telegram_input_queue.get()
-    try:
-        # let's give the user a chance to send a follow-up if they forgot something
-        yield await asyncio.wait_for(telegram_input_queue.get(), timeout=3)
-        while True:
-            # if they did actually send a follow-up, then let's wait for a bit longer
-            yield await asyncio.wait_for(telegram_input_queue.get(), timeout=15)
-    except asyncio.TimeoutError:
-        # if timeout happens we just finish the function - the user is done sending messages and is waiting
-        # for a response from the Versatilis agent
-        pass
 
 
 class TelegramUpdateMessage(Message):
