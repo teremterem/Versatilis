@@ -80,14 +80,14 @@ async def telegram_chain_loop() -> None:
 
 
 @miniagent
-async def echo_to_console(ctx: InteractionContext) -> None:
+async def echo_to_console(ctx: InteractionContext, color: int = 92) -> None:
     """
     MiniAgent that echoes messages to the console token by token.
     """
     ctx.reply(ctx.messages)  # return the messages as they are
     async for message_promise in ctx.messages:
         async for token in message_promise:
-            print(f"\033[92;1m{token}\033[0m", end="", flush=True)
+            print(f"\033[{color};1m{token}\033[0m", end="", flush=True)
 
 
 @miniagent

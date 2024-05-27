@@ -135,7 +135,7 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
-    # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel,cyclic-import
     from miniagents_copilot.agents.telegram_agents import echo_to_console
 
     chat_history = fetch_history(history_file=CHAT_FILE)
@@ -155,6 +155,7 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
                 chat_history,
                 current_model=CLAUDE_OPUS,
             ),
+            color=93,
         ),
         history_file=BASE_SETUP_FOLDER / "CLAUDE.md",
         model=CLAUDE_OPUS,
