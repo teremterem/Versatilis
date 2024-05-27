@@ -8,7 +8,7 @@ from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext
 
 
-async def fetch_history(history_file: str | Path) -> list[Message]:
+def fetch_history(history_file: str | Path) -> list[Message]:
     """
     TODO Oleksandr: docstring
     """
@@ -53,6 +53,7 @@ async def append_history_agent(ctx: InteractionContext, history_file: str | Path
     """
     ctx.reply(ctx.messages)  # just pass the same input messages forward (before saving them to the history file)
 
+    history_file = Path(history_file)
     history_file_not_empty = history_file.exists() and history_file.stat().st_size > 0
 
     last_role = None

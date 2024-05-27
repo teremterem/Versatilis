@@ -2,10 +2,11 @@
 TODO Oleksandr: figure out the role of this module
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from miniagents.messages import Message
-from miniagents.miniagents import miniagent, InteractionContext
+from miniagents.miniagents import miniagent, InteractionContext, MiniAgent
 
 from miniagents_copilot.agents.history_agents import fetch_history
 from versatilis_config import openai_agent, anthropic_agent
@@ -29,7 +30,10 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
     MiniAgent that receives the complete content of the MiniAgents project in its prompt.
     """
     system_header = (agent_folder / "system-header.md").read_text(encoding="utf-8")
-    system_footer = (agent_folder / "system-footer.md").read_text(encoding="utf-8")
+    try:
+        system_footer = (agent_folder / "system-footer.md").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        system_footer = ""
 
     full_repo_message = FullRepoMessage.create()
     full_repo_md_file = BASE_SETUP_FOLDER / "transient/full-repo.md"
@@ -38,14 +42,17 @@ async def full_repo_agent(ctx: InteractionContext, agent_folder: Path, current_m
 
     llm_agent = openai_agent if current_model == GPT_4O else anthropic_agent
 
+    messages = [
+        Message(text=system_header, role="system"),
+        full_repo_message,
+    ]
+    if system_footer:
+        messages.append(Message(text=system_footer, role="system"))
+    messages.append(ctx.messages)
+
     ctx.reply(
         llm_agent.inquire(
-            [
-                Message(text=system_header, role="system"),
-                full_repo_message,
-                Message(text=system_footer, role="system"),
-                ctx.messages,
-            ],
+            messages,
             model=current_model,
             max_tokens=1500,
             temperature=0.0,
@@ -66,7 +73,6 @@ documenter = miniagent(
 researcher = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "researcher",
-    current_model=RESEARCHER_MODEL,
 )
 research_planner = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
@@ -76,8 +82,45 @@ research_planner = miniagent(
 answerer = miniagent(
     full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
     agent_folder=BASE_SETUP_FOLDER / "answerer",
-    current_model=ANSWERER_MODEL,
 )
+free_agent = miniagent(
+    full_repo_agent,  # TODO Oleksandr: figure out why the type checker is not happy with this parameter
+    agent_folder=BASE_SETUP_FOLDER / "free-bot",
+)
+
+
+@dataclass
+class VersatilisAgentSetup:
+    """
+    A dataclass that holds the setup information for the Versatilis agent.
+    """
+
+    model: str
+    history_file: Path
+    agent: MiniAgent
+    answerer_mode: bool
+
+    @classmethod
+    def get(cls):
+        """
+        Get the setup for the Versatilis agent.
+        """
+        if ANSWERS_FILE.exists():
+            # if answers file exists, then we are in "answerer" mode
+            return cls(
+                model=ANSWERER_MODEL,
+                history_file=ANSWERS_FILE,
+                agent=answerer,
+                answerer_mode=True,
+            )
+
+        # otherwise, we are in "researcher" mode
+        return cls(
+            model=RESEARCHER_MODEL,
+            history_file=CHAT_FILE,
+            agent=researcher,
+            answerer_mode=False,
+        )
 
 
 @miniagent
@@ -85,23 +128,36 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
-    chat_history = await fetch_history(history_file=CHAT_FILE)
+    chat_history = fetch_history(history_file=CHAT_FILE)
 
-    if ANSWERS_FILE.exists():
-        # if answers file exists, then we are in "answerer" mode
-        answers_history = await fetch_history(history_file=ANSWERS_FILE)
+    setup = VersatilisAgentSetup.get()
+    # if not chat_history:
+    #     ctx.reply(Message(text="Hello! I am Versatilis. How can I help you today?", role="assistant"))
+    #     return
+    #
+    # ctx.reply(free_agent.inquire(chat_history))
+
+    if setup.answerer_mode:
+        # we are in "answerer" mode
+        answers_history = fetch_history(history_file=ANSWERS_FILE)
         ctx.reply(
-            answerer.inquire(
+            setup.agent.inquire(
                 [
                     # in the chat history answerer sees assistant as user and user as assistant
                     role_inversion_agent.inquire(chat_history),
                     answers_history,  # in the answerer portion of the chat history roles are not flipped
-                ]
+                ],
+                current_model=setup.model,
             )
         )
     else:
         # otherwise, we are in "researcher" mode
-        ctx.reply(researcher.inquire(chat_history))
+        ctx.reply(
+            setup.agent.inquire(
+                chat_history,
+                current_model=setup.model,
+            )
+        )
 
 
 @miniagent
