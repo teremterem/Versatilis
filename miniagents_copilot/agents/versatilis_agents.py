@@ -135,6 +135,9 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
+    # pylint: disable=import-outside-toplevel
+    from miniagents_copilot.agents.telegram_agents import echo_to_console
+
     chat_history = fetch_history(history_file=CHAT_FILE)
 
     setup = VersatilisAgentSetup.get()
@@ -147,9 +150,11 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     #  problem for agents whose response we're not interested in (but still want to know why they failed if they
     #  did) ? to reproduce just remove required `model` kwarg from append_history_agent.inquire() call
     append_history_agent.inquire(
-        free_agent.inquire(
-            chat_history,
-            current_model=CLAUDE_OPUS,
+        echo_to_console.inquire(
+            free_agent.inquire(
+                chat_history,
+                current_model=CLAUDE_OPUS,
+            ),
         ),
         history_file=BASE_SETUP_FOLDER / "CLAUDE.md",
         model=CLAUDE_OPUS,
