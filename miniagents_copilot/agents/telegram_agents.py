@@ -111,7 +111,7 @@ async def user_agent(ctx: InteractionContext) -> None:
         ],
         history_file=setup.history_file,
         model=setup.model,
-    ).acollect_messages()
+    ).aresolve_messages()
 
 
 @miniagent

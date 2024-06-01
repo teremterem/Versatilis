@@ -135,7 +135,6 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
-
     chat_history = fetch_history(history_file=CHAT_FILE)
 
     setup = VersatilisAgentSetup.get()

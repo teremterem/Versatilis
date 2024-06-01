@@ -84,7 +84,7 @@ async def on_persist_message(_, message: Message) -> None:
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "COLLECTED: %s\n\n%s\n\n%s\n",
+                "RESOLVED: %s\n\n%s\n\n%s\n",
                 message.class_,
                 message.hash_key,
                 pformat(message.serialize(), width=119),

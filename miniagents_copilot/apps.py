@@ -39,9 +39,9 @@ class MiniAgentsCopilotConfig(AppConfig):
             await telegram_app.bot.set_webhook(webhook_url)
             logger.info("MiniAgentsCopilotConfig.ready() - telegram bot webhook set")
 
-        mini_agents.schedule_task(_init_telegram_bot())
+            # the main agent loop
+            await telegram_chain_loop()
 
-        # start the agent loop
-        asyncio.create_task(telegram_chain_loop())
+        asyncio.create_task(_init_telegram_bot())
 
         logger.info("MiniAgentsCopilotConfig.ready() - exited")
