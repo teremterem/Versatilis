@@ -105,6 +105,13 @@ class VersatilisAgentSetup:
         """
         Get the setup for the Versatilis agent.
         """
+        return cls(
+            model=CLAUDE_OPUS,
+            history_file=CHAT_FILE,
+            agent=free_agent,
+            answerer_mode=False,
+        )
+
         if ANSWERS_FILE.exists():
             # if answers file exists, then we are in "answerer" mode
             return cls(
@@ -128,14 +135,31 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
     """
     The main MiniAgent that orchestrates the conversation between the user and the Versatilis sub-agents.
     """
+
     chat_history = fetch_history(history_file=CHAT_FILE)
 
     setup = VersatilisAgentSetup.get()
-    # if not chat_history:
-    #     ctx.reply(Message(text="Hello! I am Versatilis. How can I help you today?", role="assistant"))
-    #     return
-    #
-    # ctx.reply(free_agent.inquire(chat_history))
+    if not chat_history:
+        ctx.reply(Message(text="Hello! I am Versatilis. How can I help you today?", role="assistant"))
+        return
+
+    # # pylint: disable=import-outside-toplevel,cyclic-import
+    # from miniagents_copilot.agents.telegram_agents import echo_to_console
+    # # ask GPT-4o too
+    # # TODO Oleksandr: when we don't await the response we also don't see errors if they happen - how to fix this
+    # #  problem for agents whose response we're not interested in (but still want to know why they failed if they
+    # #  did) ? to reproduce just remove required `model` kwarg from append_history_agent.inquire() call
+    # append_history_agent.inquire(
+    #     echo_to_console.inquire(
+    #         free_agent.inquire(
+    #             chat_history,
+    #             current_model=GPT_4O,
+    #         ),
+    #         color=93,
+    #     ),
+    #     history_file=BASE_SETUP_FOLDER / "GPT-4o.md",
+    #     model=GPT_4O,
+    # )
 
     if setup.answerer_mode:
         # we are in "answerer" mode
