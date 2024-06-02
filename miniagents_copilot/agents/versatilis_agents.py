@@ -8,7 +8,7 @@ from pathlib import Path
 from miniagents.messages import Message
 from miniagents.miniagents import miniagent, InteractionContext, MiniAgent
 
-from miniagents_copilot.agents.history_agents import fetch_history
+from miniagents_copilot.agents.history_agents import fetch_history, append_history_agent
 from versatilis_config import openai_agent, anthropic_agent
 
 BASE_SETUP_FOLDER = (Path(__file__).parent / "../../../talk-about-miniagents").resolve()
@@ -96,7 +96,7 @@ class VersatilisAgentSetup:
     """
 
     model: str
-    history_file: Path
+    history_file: str
     agent: MiniAgent
     answerer_mode: bool
 
@@ -107,7 +107,7 @@ class VersatilisAgentSetup:
         """
         return cls(
             model=CLAUDE_OPUS,
-            history_file=CHAT_FILE,
+            history_file=str(CHAT_FILE),
             agent=free_agent,
             answerer_mode=False,
         )
@@ -116,7 +116,7 @@ class VersatilisAgentSetup:
             # if answers file exists, then we are in "answerer" mode
             return cls(
                 model=ANSWERER_MODEL,
-                history_file=ANSWERS_FILE,
+                history_file=str(ANSWERS_FILE),
                 agent=answerer,
                 answerer_mode=True,
             )
@@ -124,7 +124,7 @@ class VersatilisAgentSetup:
         # otherwise, we are in "researcher" mode
         return cls(
             model=RESEARCHER_MODEL,
-            history_file=CHAT_FILE,
+            history_file=str(CHAT_FILE),
             agent=researcher,
             answerer_mode=False,
         )
@@ -142,23 +142,21 @@ async def versatilis_agent(ctx: InteractionContext) -> None:
         ctx.reply(Message(text="Hello! I am Versatilis. How can I help you today?", role="assistant"))
         return
 
-    # # pylint: disable=import-outside-toplevel,cyclic-import
-    # from miniagents_copilot.agents.telegram_agents import echo_to_console
-    # # ask GPT-4o too
-    # # TODO Oleksandr: when we don't await the response we also don't see errors if they happen - how to fix this
-    # #  problem for agents whose response we're not interested in (but still want to know why they failed if they
-    # #  did) ? to reproduce just remove required `model` kwarg from append_history_agent.inquire() call
-    # append_history_agent.inquire(
-    #     echo_to_console.inquire(
-    #         free_agent.inquire(
-    #             chat_history,
-    #             current_model=GPT_4O,
-    #         ),
-    #         color=93,
-    #     ),
-    #     history_file=BASE_SETUP_FOLDER / "GPT-4o.md",
-    #     model=GPT_4O,
-    # )
+    # pylint: disable=import-outside-toplevel,cyclic-import
+    from miniagents_copilot.agents.telegram_agents import echo_to_console
+
+    # ask GPT-4o too
+    append_history_agent.inquire(
+        echo_to_console.inquire(
+            free_agent.inquire(
+                chat_history,
+                current_model=GPT_4O,
+            ),
+            color=93,
+        ),
+        history_file=str(BASE_SETUP_FOLDER / "GPT-4o.md"),
+        model=GPT_4O,
+    )
 
     if setup.answerer_mode:
         # we are in "answerer" mode

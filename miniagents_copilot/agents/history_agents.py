@@ -47,17 +47,17 @@ def fetch_history(history_file: str | Path) -> list[Message]:
 
 
 @miniagent
-async def append_history_agent(ctx: InteractionContext, history_file: str | Path, model: str):
+async def append_history_agent(ctx: InteractionContext, history_file: str, model: str):
     """
     TODO Oleksandr: docstring
     """
     ctx.reply(ctx.messages)  # just pass the same input messages forward (before saving them to the history file)
 
-    history_file = Path(history_file)
-    history_file_not_empty = history_file.exists() and history_file.stat().st_size > 0
+    history_file_path = Path(history_file)
+    history_file_not_empty = history_file_path.exists() and history_file_path.stat().st_size > 0
 
     last_role = None
-    with history_file.open("a", encoding="utf-8") as chat_history:
+    with history_file_path.open("a", encoding="utf-8") as chat_history:
         async for message_promise in ctx.messages:
             message = await message_promise
             if not str(message).strip():
