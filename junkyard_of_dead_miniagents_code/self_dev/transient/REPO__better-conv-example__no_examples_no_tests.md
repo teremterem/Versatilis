@@ -1,0 +1,2641 @@
+File list:
+```
+miniagents/chat_history.py
+miniagents/ext/chat_history_md.py
+miniagents/ext/console_user_agent.py
+miniagents/ext/llm/anthropic.py
+miniagents/ext/llm/llm_common.py
+miniagents/ext/llm/openai.py
+miniagents/messages.py
+miniagents/miniagent_typing.py
+miniagents/miniagents.py
+miniagents/promising/errors.py
+miniagents/promising/ext/frozen.py
+miniagents/promising/promise_typing.py
+miniagents/promising/promising.py
+miniagents/promising/sentinels.py
+miniagents/promising/sequence.py
+miniagents/utils.py
+pyproject.toml
+```
+
+
+
+miniagents/chat_history.py
+```python
+"""
+This module contains abstractions for chat history management.
+"""
+
+from abc import ABC, abstractmethod
+from functools import cached_property
+
+from miniagents.messages import Message
+from miniagents.miniagent_typing import MessageType
+from miniagents.miniagents import InteractionContext, miniagent, MiniAgent, MessageSequence
+
+
+class ChatHistory(ABC):
+    """
+    Abstract class for loading chat history from a storage as well as writing new messages to it.
+    """
+
+    @cached_property
+    def logging_agent(self) -> MiniAgent:
+        """
+        The agent that logs the chat history to a storage. Replies with the same messages for agent
+        chaining purposes.
+        """
+        return miniagent(self._logging_agent_chained)
+
+    @abstractmethod
+    async def aload_chat_history(self) -> tuple[Message]:
+        """
+        Load the chat history from the storage.
+        """
+
+    @abstractmethod
+    async def _logging_agent(self, ctx: InteractionContext) -> None:
+        """
+        The implementation of the agent that logs the chat history to a storage.
+        """
+
+    async def _logging_agent_chained(self, ctx: InteractionContext) -> None:
+        """
+        The implementation of the agent that logs the chat history to a storage.
+
+        ATTENTION! Apart for logging the messages, it also replies with the same messages for agent
+        chaining purposes.
+        """
+        ctx.reply(ctx.messages)  # asynchronously(!) reply with the same messages for agent chaining purposes
+        await self._logging_agent(ctx)
+
+
+class InMemoryChatHistory(ChatHistory):
+    """
+    Class for loading chat history from memory as well as writing new messages to it.
+    """
+
+    def __init__(self) -> None:
+        self._chat_history: list[MessageType] = []
+
+    async def _logging_agent(self, ctx: InteractionContext) -> None:
+        """
+        The implementation of the agent that logs the chat history to memory.
+        """
+        self._chat_history.append(ctx.messages)
+
+    async def aload_chat_history(self) -> tuple[Message, ...]:
+        """
+        Load the chat history from memory.
+        """
+        return await MessageSequence.aresolve_messages(self._chat_history)
+```
+
+
+
+miniagents/ext/chat_history_md.py
+```python
+"""
+This module provides a class working with chat history stored in a markdown file.
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Union
+
+from markdown_it import MarkdownIt
+
+from miniagents.chat_history import ChatHistory
+from miniagents.messages import Message
+from miniagents.miniagents import InteractionContext
+
+
+class ChatHistoryMD(ChatHistory):
+    """
+    Class for loading chat history from a markdown file as well as writing new messages to it.
+    """
+
+    _md = MarkdownIt()
+
+    def __init__(self, chat_md_file: Union[str, Path], default_role: str = "assistant") -> None:
+        self._chat_md_file = Path(chat_md_file)
+        self._default_role = default_role
+
+    async def _logging_agent(self, ctx: InteractionContext) -> None:
+        """
+        The implementation of the agent that logs the chat history to a markdown file.
+        """
+        with self._chat_md_file.open("a", encoding="utf-8") as chat_md_file:
+            async for msg_promise in ctx.messages:
+                try:
+                    message_role = msg_promise.preliminary_metadata.role
+                except AttributeError:
+                    message_role = self._default_role
+                try:
+                    message_model = f" / {msg_promise.preliminary_metadata.model}"
+                except AttributeError:
+                    message_model = ""
+
+                chat_md_file.write(f"\n{message_role}{message_model}\n========================================\n")
+
+                async for token in msg_promise:
+                    chat_md_file.write(token)
+
+                chat_md_file.write("\n")
+                chat_md_file.flush()
+
+    async def aload_chat_history(self) -> tuple[Message, ...]:
+        """
+        Parse a markdown content as a dialog.
+        TODO Oleksandr: implement exhaustive unit tests for this function
+        """
+        md_content = self._chat_md_file.read_text(encoding="utf-8")
+
+        md_lines = md_content.split("\n")
+        md_tokens = self._md.parse(md_content)
+
+        last_section = None
+        sections = []
+
+        for idx, md_token in enumerate(md_tokens):
+            if md_token.type != "heading_open" or md_token.tag != "h1" or md_token.level != 0:
+                continue
+
+            heading = md_tokens[idx + 1].content  # the next token is `inline` with the heading content
+            heading_parts = heading.split("/", maxsplit=1)
+            role = heading_parts[0].strip().lower()
+
+            if role not in ["user", "assistant"]:
+                continue
+
+            if len(heading_parts) > 1:
+                model = heading_parts[1].strip()
+                if any(c.isspace() for c in model):
+                    # model name should not contain whitespaces - this heading is probably not really a role heading
+                    continue
+            else:
+                model = None
+
+            if last_section:
+                last_section.content = self._grab_and_clean_up_lines(
+                    md_lines, last_section.content_start_line, md_token.map[0]
+                )
+                sections.append(last_section)
+
+            last_section = self._Section(
+                role=role,
+                model=model,
+                content_start_line=md_token.map[1],
+            )
+
+        if last_section:
+            last_section.content = self._grab_and_clean_up_lines(md_lines, last_section.content_start_line)
+            sections.append(last_section)
+
+        return tuple(Message(role=section.role, model=section.model, text=section.content) for section in sections)
+
+    @staticmethod
+    def _grab_and_clean_up_lines(md_lines: list[str], start_line: int, end_line: Optional[int] = None) -> str:
+        """
+        Grab a snippet of the markdown content by start and end line numbers and clean it up (remove leading
+        and trailing empty lines).
+        """
+        if end_line is None:
+            end_line = len(md_lines)
+
+        content_lines = md_lines[start_line:end_line]
+
+        # remove leading and trailing empty lines (but keep the leading and trailing whitespaces of the
+        # non-empty lines)
+        while content_lines and not content_lines[0].strip():
+            content_lines.pop(0)
+        while content_lines and not content_lines[-1].strip():
+            content_lines.pop()
+
+        if not content_lines:
+            # there is no content in this section
+            return ""
+
+        return "\n".join(content_lines)
+
+    @dataclass
+    class _Section:
+        """
+        Represents a section of the markdown content.
+        """
+
+        role: str
+        model: Optional[str]
+        content_start_line: int
+        content: Optional[str] = None
+```
+
+
+
+miniagents/ext/console_user_agent.py
+```python
+"""
+This module provides a user agent that reads user input from the console, writes back to the console and also keeps
+track of the chat history using the provided ChatHistory object.
+"""
+
+from prompt_toolkit import PromptSession, HTML
+from prompt_toolkit.document import Document
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
+from prompt_toolkit.lexers import Lexer
+from prompt_toolkit.styles import Style
+
+from miniagents.chat_history import ChatHistory, InMemoryChatHistory
+from miniagents.ext.llm.llm_common import UserMessage
+from miniagents.miniagents import miniagent, InteractionContext, MiniAgent
+
+
+def create_console_user_agent(
+    chat_history: ChatHistory = None, alias: str = "USER_AGENT", **miniagent_kwargs
+) -> MiniAgent:
+    """
+    Create a user agent that reads user input from the console, writes back to the console and also keeps
+    track of the chat history using the provided ChatHistory object.
+    """
+    if chat_history is None:
+        chat_history = InMemoryChatHistory()
+    return miniagent(_console_user_agent, chat_history=chat_history, alias=alias, **miniagent_kwargs)
+
+
+async def _console_user_agent(ctx: InteractionContext, chat_history: ChatHistory) -> None:
+    """
+    User agent that reads user input from the console, writes back to the console and also keeps track of
+    the chat history using the provided ChatHistory object.
+    """
+    # technically `input_messages` are going to be the same as `ctx.messages`, but reading them instead of the
+    # original `ctx.messages` ensures that all these messages will be logged to the chat history by the time
+    # we are done iterating over `input_messages` here (because our async loop here will have to wait for the
+    # `logging_agent` to finish in order to be sure that these are all the messages there are in `logging_agent`
+    # response)
+    input_messages = chat_history.logging_agent.inquire(ctx.messages)
+
+    assistant_style = "\033[92;1m"
+    cancel_style = "\033[0m"
+
+    async for msg_promise in input_messages:
+        print(f"\n{assistant_style}{msg_promise.preliminary_metadata.agent_alias}: {cancel_style}", end="", flush=True)
+        async for token in msg_promise:
+            print(f"{assistant_style}{token}{cancel_style}", end="", flush=True)
+        print("\n")
+
+    # TODO Oleksandr: should MessageSequencePromise support `cancel()` operation
+    #  (to interrupt whoever is producing it) ?
+
+    # TODO Oleksandr: mention that ctrl+space is used to insert a newline ?
+    user_input = await _prompt_session.prompt_async(
+        HTML("<user_utterance>USER: </user_utterance>"),
+        multiline=True,
+        key_bindings=_prompt_bindings,
+        lexer=_CustomPromptLexer(),
+        style=_user_prompt_style,
+    )
+    # the await below makes sure that writing to the chat history is finished before we proceed to reading it back
+    await chat_history.logging_agent.inquire(UserMessage(user_input))
+
+    chat_history = await chat_history.aload_chat_history()
+    ctx.reply(chat_history)
+
+
+_user_prompt_style = Style.from_dict({"user_utterance": "fg:ansibrightyellow bold"})
+
+_prompt_session = PromptSession()
+
+_prompt_bindings = KeyBindings()
+
+
+@_prompt_bindings.add(Keys.Enter)
+def _prompt_binding_enter(event):
+    event.current_buffer.validate_and_handle()
+
+
+@_prompt_bindings.add(Keys.ControlSpace)
+def _prompt_binding_control_space(event):
+    event.current_buffer.insert_text("\n")
+
+
+class _CustomPromptLexer(Lexer):
+    """
+    Custom lexer that paints user utterances in yellow (and bold).
+    """
+
+    def lex_document(self, document: Document):
+        """
+        Lex the document.
+        """
+        return lambda i: [("class:user_utterance", document.text.split("\n")[i])]
+```
+
+
+
+miniagents/ext/llm/anthropic.py
+```python
+# pylint: disable=duplicate-code
+"""
+This module integrates Anthropic language models with MiniAgents.
+"""
+
+import logging
+import typing
+from pprint import pformat
+from typing import AsyncIterator, Any, Optional
+
+from anthropic import NOT_GIVEN
+
+from miniagents.ext.llm.llm_common import message_to_llm_dict, AssistantMessage
+from miniagents.miniagents import (
+    miniagent,
+    MiniAgent,
+    MiniAgents,
+    InteractionContext,
+)
+
+if typing.TYPE_CHECKING:
+    import anthropic as anthropic_original
+
+logger = logging.getLogger(__name__)
+
+
+class AnthropicMessage(AssistantMessage):
+    """
+    A message generated by an Anthropic model.
+    """
+
+
+def create_anthropic_agent(
+    async_client: Optional["anthropic_original.AsyncAnthropic"] = None,
+    reply_metadata: Optional[dict[str, Any]] = None,
+    alias: str = "ANTHROPIC_AGENT",
+    **mini_agent_kwargs,
+) -> MiniAgent:
+    """
+    Create an MiniAgent for Anthropic models (see MiniAgent class definition and docstring for usage details).
+    """
+    if not async_client:
+        # pylint: disable=import-outside-toplevel
+        # noinspection PyShadowingNames
+        import anthropic as anthropic_original
+
+        async_client = anthropic_original.AsyncAnthropic()
+
+    return miniagent(
+        _anthropic_func,
+        async_client=async_client,
+        global_reply_metadata=reply_metadata,
+        alias=alias,
+        **mini_agent_kwargs,
+    )
+
+
+async def _anthropic_func(
+    ctx: InteractionContext,
+    async_client: "anthropic_original.AsyncAnthropic",
+    global_reply_metadata: Optional[dict[str, Any]],
+    model: str,
+    reply_metadata: Optional[dict[str, Any]] = None,
+    stream: Optional[bool] = None,
+    system: Optional[str] = None,
+    fake_first_user_message: str = "/start",
+    message_delimiter_for_same_role: str = "\n\n",
+    **kwargs,
+) -> None:
+    """
+    Run text generation with Anthropic.
+    """
+    if stream is None:
+        stream = MiniAgents.get_current().stream_llm_tokens_by_default
+
+    async def message_token_streamer(metadata_so_far: dict[str, Any]) -> AsyncIterator[str]:
+        resolved_messages = await ctx.messages.aresolve_messages()
+
+        message_dicts = [message_to_llm_dict(msg) for msg in resolved_messages]
+        message_dicts = _fix_message_dicts(
+            message_dicts,
+            fake_first_user_message=fake_first_user_message,
+            message_delimiter_for_same_role=message_delimiter_for_same_role,
+        )
+
+        if message_dicts and message_dicts[-1]["role"] == "system":
+            # let's strip away the system message at the end
+            system_message_dict = message_dicts.pop()
+            system_combined = (
+                system_message_dict["content"]
+                if system is None
+                else f"{system}{message_delimiter_for_same_role}{system_message_dict['content']}"
+            )
+        else:
+            system_combined = system
+
+        if system_combined is None:
+            system_combined = NOT_GIVEN
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "SENDING TO ANTHROPIC:\n\n%s\nSYSTEM:\n%s\n", pformat(message_dicts), pformat(system_combined)
+            )
+
+        if stream:
+            # pylint: disable=not-async-context-manager
+            async with async_client.messages.stream(
+                messages=message_dicts, system=system_combined, model=model, **kwargs
+            ) as response:
+                async for token in response.text_stream:
+                    yield token
+                anthropic_final_message = await response.get_final_message()
+        else:
+            anthropic_final_message = await async_client.messages.create(
+                messages=message_dicts, stream=False, system=system_combined, model=model, **kwargs
+            )
+            if len(anthropic_final_message.content) != 1:
+                raise RuntimeError(
+                    f"exactly one TextBlock was expected from Anthropic, "
+                    f"but {len(anthropic_final_message.content)} were returned instead"
+                )
+            yield anthropic_final_message.content[0].text  # yield the whole text as one "piece"
+
+        metadata_so_far.update(anthropic_final_message.model_dump(exclude={"content"}))
+
+    ctx.reply(
+        AnthropicMessage.promise(
+            start_asap=True,  # TODO Oleksandr: should this be customizable ?
+            message_token_streamer=message_token_streamer,
+            # preliminary metadata:
+            model=model,
+            agent_alias=ctx.this_agent.alias,
+            **(global_reply_metadata or {}),
+            **(reply_metadata or {}),
+        )
+    )
+
+
+def _fix_message_dicts(
+    message_dicts: list[dict[str, Any]], fake_first_user_message: str, message_delimiter_for_same_role: str
+) -> list[dict[str, Any]]:
+    if not message_dicts:
+        return []
+
+    # let's put all the system messages at the end (they will be stripped away)
+    non_system_message_dicts = [message_dict for message_dict in message_dicts if message_dict["role"] != "system"]
+    system_message_dicts = [message_dict for message_dict in message_dicts if message_dict["role"] == "system"]
+    message_dicts = non_system_message_dicts + system_message_dicts
+
+    fixed_message_dicts = []
+    if message_dicts[0]["role"] != "user":
+        # Anthropic requires the first message to come from the user (system messages don't count - their content
+        # will go into a separate, `system` parameter of the API call)
+        fixed_message_dicts.append({"role": "user", "content": fake_first_user_message})
+
+    # if multiple messages with the same role are sent in a row, they should be concatenated
+    for message_dict in message_dicts:
+        if fixed_message_dicts and message_dict["role"] == fixed_message_dicts[-1]["role"]:
+            fixed_message_dicts[-1]["content"] += message_delimiter_for_same_role + message_dict["content"]
+        else:
+            fixed_message_dicts.append(message_dict)
+
+    return fixed_message_dicts
+```
+
+
+
+miniagents/ext/llm/llm_common.py
+```python
+"""
+Common classes and functions for working with large language models.
+"""
+
+from typing import Any, Optional
+
+from miniagents.messages import Message
+
+
+class UserMessage(Message):
+    """
+    A message from a user.
+    """
+
+    role: str = "user"
+
+
+class SystemMessage(Message):
+    """
+    A message that is marked as a system message (a concept in large language models).
+    """
+
+    role: str = "system"
+
+
+class AssistantMessage(Message):
+    """
+    A message generated by a large language model.
+    """
+
+    role: str = "assistant"
+    model: Optional[str] = None
+    agent_alias: Optional[str] = None
+
+
+def message_to_llm_dict(message: Message) -> dict[str, Any]:
+    """
+    Convert a message to a dictionary that can be sent to a large language model.
+    """
+    try:
+        role = message.role
+    except AttributeError:
+        role = "user"
+
+    return {
+        "role": role,
+        "content": str(message),
+    }
+```
+
+
+
+miniagents/ext/llm/openai.py
+```python
+# pylint: disable=duplicate-code
+"""
+This module integrates OpenAI language models with MiniAgents.
+"""
+
+import logging
+import typing
+from pprint import pformat
+from typing import AsyncIterator, Any, Optional
+
+from miniagents.ext.llm.llm_common import message_to_llm_dict, AssistantMessage
+from miniagents.miniagents import (
+    miniagent,
+    MiniAgent,
+    MiniAgents,
+    InteractionContext,
+)
+
+if typing.TYPE_CHECKING:
+    import openai as openai_original
+
+logger = logging.getLogger(__name__)
+
+
+class OpenAIMessage(AssistantMessage):
+    """
+    A message generated by an OpenAI model.
+    """
+
+
+def create_openai_agent(
+    async_client: Optional["openai_original.AsyncOpenAI"] = None,
+    reply_metadata: Optional[dict[str, Any]] = None,
+    alias: str = "OPENAI_AGENT",
+    **mini_agent_kwargs,
+) -> MiniAgent:
+    """
+    Create an MiniAgent for OpenAI models (see MiniAgent class definition and docstring for usage details).
+    """
+    if not async_client:
+        # pylint: disable=import-outside-toplevel
+        # noinspection PyShadowingNames
+        import openai as openai_original
+
+        async_client = openai_original.AsyncOpenAI()
+
+    return miniagent(
+        _openai_func,
+        async_client=async_client,
+        global_reply_metadata=reply_metadata,
+        alias=alias,
+        **mini_agent_kwargs,
+    )
+
+
+async def _openai_func(
+    ctx: InteractionContext,
+    async_client: "openai_original.AsyncOpenAI",
+    global_reply_metadata: Optional[dict[str, Any]],
+    model: str,
+    reply_metadata: Optional[dict[str, Any]] = None,
+    stream: Optional[bool] = None,
+    system: Optional[str] = None,
+    n: int = 1,
+    **kwargs,
+) -> None:
+    """
+    Run text generation with OpenAI.
+    """
+    if stream is None:
+        stream = MiniAgents.get_current().stream_llm_tokens_by_default
+
+    if n != 1:
+        raise ValueError("Only n=1 is supported by MiniAgents for AsyncOpenAI().chat.completions.create()")
+
+    async def message_token_streamer(metadata_so_far: dict[str, Any]) -> AsyncIterator[str]:
+        resolved_messages = await ctx.messages.aresolve_messages()
+
+        if system is None:
+            message_dicts = []
+        else:
+            message_dicts = [
+                {
+                    "role": "system",
+                    "content": system,
+                },
+            ]
+        message_dicts.extend(message_to_llm_dict(msg) for msg in resolved_messages)
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("SENDING TO OPENAI:\n\n%s\n", pformat(message_dicts))
+
+        openai_response = await async_client.chat.completions.create(
+            messages=message_dicts, model=model, stream=stream, **kwargs
+        )
+        if stream:
+            async for chunk in openai_response:
+                if len(chunk.choices) != 1:  # TODO Oleksandr: do I really need to check it for every token ?
+                    raise RuntimeError(
+                        f"exactly one Choice was expected from OpenAI, "
+                        f"but {len(openai_response.choices)} were returned instead"
+                    )
+                token = chunk.choices[0].delta.content
+                if token:
+                    yield token
+
+                metadata_so_far["role"] = chunk.choices[0].delta.role or metadata_so_far["role"]
+                _merge_openai_dicts(
+                    metadata_so_far,
+                    chunk.model_dump(exclude={"choices": {0: {"index": ..., "delta": {"content": ..., "role": ...}}}}),
+                )
+        else:
+            if len(openai_response.choices) != 1:
+                raise RuntimeError(
+                    f"exactly one Choice was expected from OpenAI, "
+                    f"but {len(openai_response.choices)} were returned instead"
+                )
+            yield openai_response.choices[0].message.content  # yield the whole text as one "piece"
+
+            metadata_so_far["role"] = openai_response.choices[0].message.role
+            metadata_so_far.update(
+                openai_response.model_dump(
+                    exclude={"choices": {0: {"index": ..., "message": {"content": ..., "role": ...}}}}
+                )
+            )
+
+    ctx.reply(
+        OpenAIMessage.promise(
+            start_asap=True,  # TODO Oleksandr: should this be customizable ?
+            message_token_streamer=message_token_streamer,
+            # preliminary metadata:
+            model=model,
+            agent_alias=ctx.this_agent.alias,
+            **(global_reply_metadata or {}),
+            **(reply_metadata or {}),
+        )
+    )
+
+
+def _merge_openai_dicts(destination_dict: dict[str, Any], dict_to_merge: dict[str, Any]) -> None:
+    """
+    Merge the dict_to_merge into the destination_dict.
+    """
+    for key, value in dict_to_merge.items():
+        if value is not None:
+            existing_value = destination_dict.get(key)
+            if isinstance(existing_value, dict):
+                _merge_openai_dicts(existing_value, value)
+            elif isinstance(existing_value, list):
+                if key == "choices":
+                    if not existing_value:
+                        destination_dict[key] = [{}]  # we only expect a single choice in our implementation
+                    _merge_openai_dicts(destination_dict[key][0], value[0])
+                else:
+                    destination_dict[key].extend(value)
+            else:
+                destination_dict[key] = value
+```
+
+
+
+miniagents/messages.py
+```python
+"""
+`Message` class and other classes related to messages.
+"""
+
+from functools import cached_property
+from typing import AsyncIterator, Any, Union, Optional, Iterator
+
+from miniagents.miniagent_typing import MessageTokenStreamer
+from miniagents.promising.ext.frozen import Frozen
+from miniagents.promising.promising import StreamedPromise
+from miniagents.promising.sentinels import Sentinel, DEFAULT
+
+
+class Message(Frozen):
+    """
+    A message that can be sent between agents.
+    """
+
+    text: Optional[str] = None
+    text_template: Optional[str] = None
+
+    @cached_property
+    def as_promise(self) -> "MessagePromise":
+        """
+        Convert this message into a MessagePromise object.
+        """
+        return MessagePromise(prefill_message=self)
+
+    @classmethod
+    def promise(
+        cls,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        message_token_streamer: Optional[MessageTokenStreamer] = None,
+        **preliminary_metadata,
+    ) -> "MessagePromise":
+        """
+        Create a MessagePromise object based on the Message class this method is called for and the provided
+        arguments.
+        """
+        if message_token_streamer:
+            return MessagePromise(
+                start_asap=start_asap,
+                message_token_streamer=message_token_streamer,
+                message_class=cls,
+                **preliminary_metadata,
+            )
+        return cls(**preliminary_metadata).as_promise
+
+    def serialize(self) -> dict[str, Any]:
+        include_into_serialization, sub_messages = self._serialization_metadata
+        model_dump = self.model_dump(include=include_into_serialization)
+
+        for path, message_or_messages in sub_messages.items():
+            sub_dict = model_dump
+            for path_part in path[:-1]:
+                sub_dict = sub_dict[path_part]
+            if isinstance(message_or_messages, Message):
+                sub_dict[f"{path[-1]}__hash_key"] = message_or_messages.hash_key
+            else:
+                sub_dict[f"{path[-1]}__hash_keys"] = tuple(message.hash_key for message in message_or_messages)
+        return model_dump
+
+    def sub_messages(self) -> Iterator["Message"]:
+        """
+        Iterate over all sub-messages of this message, no matter how deep they are nested. This is a depth-first
+        traversal.
+        """
+        _, sub_messages = self._serialization_metadata
+        for _, message_or_messages in sub_messages.items():
+            if isinstance(message_or_messages, Message):
+                yield from message_or_messages.sub_messages()
+                yield message_or_messages
+            else:
+                for message in message_or_messages:
+                    yield from message.sub_messages()
+                    yield message
+
+    @cached_property
+    def _serialization_metadata(
+        self,
+    ) -> tuple[
+        dict[Union[str, int], Any],
+        dict[tuple[Union[str, int], ...], Union["Message", tuple["Message", ...]]],
+    ]:
+        include_into_serialization = {}
+        sub_messages = {}
+
+        def build_serialization_metadata(
+            inclusion_dict: dict[Union[str, int], Any],
+            node: Frozen,
+            node_path: tuple[Union[str, int], ...],
+        ) -> None:
+            # pylint: disable=protected-access
+            for field, value in node._frozen_fields_and_values(exclude_class=False):
+                if isinstance(value, Message):
+                    sub_messages[(*node_path, field)] = value
+
+                elif isinstance(value, Frozen):
+                    sub_dict = {}
+                    build_serialization_metadata(sub_dict, value, (*node_path, field))
+                    inclusion_dict[field] = sub_dict
+
+                elif isinstance(value, tuple):
+                    if value and isinstance(value[0], Message):
+                        # TODO Oleksandr: introduce a concept of MessageRef to also support "mixed" tuples (with
+                        #  both Messages and other types of values mixed together)
+                        sub_messages[(*node_path, field)] = value
+
+                    else:
+                        sub_dict = {}
+                        for idx, sub_value in enumerate(value):
+                            if isinstance(sub_value, Frozen):
+                                sub_sub_dict = {}
+                                build_serialization_metadata(sub_sub_dict, sub_value, (*node_path, field, idx))
+                                sub_dict[idx] = sub_sub_dict
+                            else:
+                                sub_dict[idx] = ...
+                        inclusion_dict[field] = sub_dict
+
+                else:
+                    # any other (primitive) type of value will be included into serialization in its entirety
+                    inclusion_dict[field] = ...
+
+        build_serialization_metadata(include_into_serialization, self, ())
+        return include_into_serialization, sub_messages
+
+    def _as_string(self) -> str:
+        if self.text is not None:
+            return self.text
+        if self.text_template is not None:
+            # TODO Oleksandr: exclude_class=False ?
+            return self.text_template.format(**self.frozen_fields_and_values())
+        return super()._as_string()
+
+    def __init__(self, text: Optional[str] = None, **metadata: Any) -> None:
+        super().__init__(text=text, **metadata)
+        self._persist_message_event_triggered = False
+
+
+class MessagePromise(StreamedPromise[str, Message]):
+    """
+    A promise of a message that can be streamed token by token.
+    """
+
+    preliminary_metadata: Frozen
+
+    def __init__(
+        self,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        message_token_streamer: Optional[MessageTokenStreamer] = None,
+        prefill_message: Optional[Message] = None,
+        message_class: type[Message] = Message,
+        **preliminary_metadata,
+    ) -> None:
+        # TODO Oleksandr: raise an error if both ready_message and message_token_streamer/preliminary_metadata
+        #  are not None (or both are None)
+        if prefill_message:
+            self.preliminary_metadata = prefill_message
+
+            super().__init__(
+                start_asap=start_asap,
+                prefill_pieces=[str(prefill_message)],
+                prefill_result=prefill_message,
+            )
+        else:
+            self.preliminary_metadata = Frozen(**preliminary_metadata)
+            self._metadata_so_far = self.preliminary_metadata.frozen_fields_and_values()
+
+            self._message_token_streamer = message_token_streamer
+            self._message_class = message_class
+            super().__init__(start_asap=start_asap)
+
+    def _streamer(self) -> AsyncIterator[str]:
+        return self._message_token_streamer(self._metadata_so_far)
+
+    async def _resolver(self) -> Message:
+        return self._message_class(
+            text="".join([token async for token in self]),
+            **self._metadata_so_far,
+        )
+
+    def __aiter__(self) -> AsyncIterator[str]:
+        # PyCharm fails to see that MessagePromise inherits AsyncIterable protocol from StreamedPromise,
+        # hence the need to explicitly declare the __aiter__ method here
+        # TODO Oleksandr: is there any other way to make PyCharm see that this class inherits AsyncIterable ?
+        return super().__aiter__()
+
+
+class MessageSequencePromise(StreamedPromise[MessagePromise, tuple[MessagePromise, ...]]):
+    """
+    A promise of a sequence of messages that can be streamed message by message.
+    """
+
+    async def aresolve_messages(self) -> tuple[Message, ...]:
+        """
+        Resolve all the messages in the sequence (which also includes collecting all the streamed tokens)
+        and return them as a tuple of Message objects.
+        """
+        # pylint: disable=consider-using-generator
+        return tuple([await message_promise async for message_promise in self])
+
+    def __aiter__(self) -> AsyncIterator[MessagePromise]:
+        # PyCharm fails to see that MessageSequencePromise inherits AsyncIterable protocol from StreamedPromise,
+        # hence the need to explicitly declare the __aiter__ method here
+        # TODO Oleksandr: is there any other way to make PyCharm see that this class inherits AsyncIterable ?
+        return super().__aiter__()
+
+    def as_single_promise(self, **kwargs) -> MessagePromise:
+        """
+        Convert this sequence promise into a single message promise that will contain all the messages from this
+        sequence (separated by double newlines by default).
+        """
+        from miniagents.utils import join_messages  # pylint: disable=import-outside-toplevel
+
+        return join_messages(self, start_asap=False, **kwargs)
+```
+
+
+
+miniagents/miniagent_typing.py
+```python
+"""
+Types of the MiniAgents framework.
+"""
+
+import typing
+from typing import AsyncIterator, Protocol, Union, Any, Iterable, AsyncIterable
+
+from pydantic import BaseModel
+
+from miniagents.promising.promise_typing import PromiseBound
+
+if typing.TYPE_CHECKING:
+    # noinspection PyUnresolvedReferences
+    from miniagents.messages import Message, MessagePromise
+    from miniagents.miniagents import InteractionContext
+
+
+class AgentFunction(Protocol):
+    """
+    A protocol for agent functions.
+    """
+
+    async def __call__(self, ctx: "InteractionContext", **kwargs) -> None: ...
+
+
+class MessageTokenStreamer(Protocol):
+    """
+    A protocol for message token streamer functions.
+    """
+
+    def __call__(self, metadata_so_far: dict[str, Any]) -> AsyncIterator[str]: ...
+
+
+class PersistMessageEventHandler(Protocol):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    async def __call__(self, promise: PromiseBound, message: "Message") -> None: ...
+
+
+# TODO Oleksandr: add documentation somewhere that explains what MessageType and SingleMessageType represent
+SingleMessageType = Union[str, dict[str, Any], BaseModel, "Message", "MessagePromise", BaseException]
+MessageType = Union[SingleMessageType, Iterable["MessageType"], AsyncIterable["MessageType"]]
+```
+
+
+
+miniagents/miniagents.py
+```python
+"""
+"Core" classes of the MiniAgents framework.
+"""
+
+import asyncio
+import copy
+import logging
+from functools import partial
+from typing import AsyncIterator, Any, Union, Optional, Callable, Iterable, Awaitable
+
+from pydantic import BaseModel
+
+from miniagents.messages import MessagePromise, MessageSequencePromise, Message
+from miniagents.miniagent_typing import MessageType, AgentFunction, PersistMessageEventHandler
+from miniagents.promising.ext.frozen import Frozen
+from miniagents.promising.promise_typing import PromiseStreamer, PromiseResolvedEventHandler
+from miniagents.promising.promising import StreamAppender, Promise, PromisingContext
+from miniagents.promising.sentinels import Sentinel, DEFAULT
+from miniagents.promising.sequence import FlatSequence
+
+logger = logging.getLogger(__name__)
+
+
+class MiniAgents(PromisingContext):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __init__(
+        self,
+        stream_llm_tokens_by_default: bool = True,
+        on_promise_resolved: Union[PromiseResolvedEventHandler, Iterable[PromiseResolvedEventHandler]] = (),
+        on_persist_message: Union[PersistMessageEventHandler, Iterable[PersistMessageEventHandler]] = (),
+        **kwargs,
+    ) -> None:
+        on_promise_resolved = (
+            [self._trigger_persist_message_event, on_promise_resolved]
+            if callable(on_promise_resolved)
+            else [self._trigger_persist_message_event, *on_promise_resolved]
+        )
+        super().__init__(on_promise_resolved=on_promise_resolved, **kwargs)
+        self.stream_llm_tokens_by_default = stream_llm_tokens_by_default
+        self.on_persist_message_handlers: list[PersistMessageEventHandler] = (
+            [on_persist_message] if callable(on_persist_message) else list(on_persist_message)
+        )
+
+    def run(self, awaitable: Awaitable[Any]) -> Any:
+        """
+        Run an awaitable in the MiniAgents context. This method is blocking. It also creates a new event loop.
+        """
+        return asyncio.run(self.arun(awaitable))
+
+    async def arun(self, awaitable: Awaitable[Any]) -> Any:
+        """
+        Run an awaitable in the MiniAgents context.
+        """
+        async with self:
+            return await awaitable
+
+    @classmethod
+    def get_current(cls) -> "MiniAgents":
+        # noinspection PyTypeChecker
+        return super().get_current()
+
+    def on_persist_message(self, handler: PersistMessageEventHandler) -> PersistMessageEventHandler:
+        """
+        Add a handler that will be called every time a Message needs to be persisted.
+        """
+        self.on_persist_message_handlers.append(handler)
+        return handler
+
+    # noinspection PyProtectedMember
+    async def _trigger_persist_message_event(self, _, obj: Any) -> None:
+        # pylint: disable=protected-access
+        if not isinstance(obj, Message):
+            return
+
+        log_level_for_errors = MiniAgents.get_current().log_level_for_errors
+
+        for sub_message in obj.sub_messages():
+            if sub_message._persist_message_event_triggered:
+                continue
+
+            for handler in self.on_persist_message_handlers:
+                self.start_asap(
+                    handler(_, sub_message), suppress_errors=True, log_level_for_errors=log_level_for_errors
+                )
+            sub_message._persist_message_event_triggered = True
+
+        if obj._persist_message_event_triggered:
+            return
+
+        for handler in self.on_persist_message_handlers:
+            self.start_asap(handler(_, obj), suppress_errors=True, log_level_for_errors=log_level_for_errors)
+        obj._persist_message_event_triggered = True
+
+
+def miniagent(
+    func: Optional[AgentFunction] = None,
+    alias: Optional[str] = None,
+    description: Optional[str] = None,
+    uppercase_func_name: bool = True,
+    normalize_spaces_in_docstring: bool = True,
+    interaction_metadata: Optional[dict[str, Any]] = None,
+    **partial_kwargs,
+) -> Union["MiniAgent", Callable[[AgentFunction], "MiniAgent"]]:
+    """
+    A decorator that converts an agent function into an agent.
+    """
+    if func is None:
+        # the decorator `@miniagent(...)` was used with arguments
+        def _decorator(f: AgentFunction) -> "MiniAgent":
+            return MiniAgent(
+                f,
+                alias=alias,
+                description=description,
+                uppercase_func_name=uppercase_func_name,
+                normalize_spaces_in_docstring=normalize_spaces_in_docstring,
+                interaction_metadata=interaction_metadata,
+                **partial_kwargs,
+            )
+
+        return _decorator
+
+    # the decorator `@miniagent` was used either without arguments or as a direct function call
+    return MiniAgent(
+        func,
+        alias=alias,
+        description=description,
+        uppercase_func_name=uppercase_func_name,
+        normalize_spaces_in_docstring=normalize_spaces_in_docstring,
+        interaction_metadata=interaction_metadata,
+        **partial_kwargs,
+    )
+
+
+class InteractionContext:
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __init__(
+        self, this_agent: "MiniAgent", messages: MessageSequencePromise, reply_streamer: StreamAppender[MessageType]
+    ) -> None:
+        self.this_agent = this_agent
+        self.messages = messages
+        self._reply_streamer = reply_streamer
+
+    def reply(self, messages: MessageType) -> None:
+        """
+        Send a reply to the messages that were received by the agent. The messages can be of any allowed MessageType.
+        They will be converted to Message objects when they arrive at the agent that sent the original messages.
+        """
+        # TODO Oleksandr: add a warning that iterators, async iterators and generators, if passed as `messages` will
+        #  not be iterated over immediately, which means that if two agent calls are passed as a generator, those
+        #  agent calls will not be scheduled for parallel execution, unless the generator is wrapped into a list (to
+        #  guarantee that it will be iterated over immediately)
+        # TODO Oleksandr: implement a utility in MiniAgents that deep-copies/freezes mutable data containers
+        #  while keeping objects of other types intact and use it in StreamAppender to freeze the state of those
+        #  objects upon their submission (this way the user will not have to worry about things like `history[:]`
+        #  in the code below)
+        self._reply_streamer.append(messages)
+
+    def finish_early(self) -> None:  # TODO Oleksandr: is this a good name for this method ?
+        """
+        TODO Oleksandr: docstring
+        """
+        # TODO Oleksandr: what to do with exceptions in agent function that may happen after this method was called ?
+        self._reply_streamer.close()
+
+
+class AgentCall:
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __init__(
+        self,
+        message_streamer: StreamAppender[MessageType],
+        reply_sequence_promise: MessageSequencePromise,
+    ) -> None:
+        self._message_streamer = message_streamer
+        self._reply_sequence_promise = reply_sequence_promise
+
+        self._message_streamer.open()
+
+    def send_message(self, message: MessageType) -> "AgentCall":
+        """
+        Send an input message to the agent.
+        """
+        self._message_streamer.append(message)
+        return self
+
+    def reply_sequence(self) -> MessageSequencePromise:
+        """
+        Finish the agent call and return the agent's response(s).
+
+        NOTE: After this method is called it is not possible to send any more requests to this AgentCall object.
+        """
+        self.finish()
+        return self._reply_sequence_promise
+
+    def finish(self) -> "AgentCall":
+        """
+        Finish the agent call.
+
+        NOTE: After this method is called it is not possible to send any more requests to this AgentCall object.
+        """
+        # TODO Oleksandr: also make sure to close the streamer when the parent agent call is finished
+        self._message_streamer.close()
+        return self
+
+
+class MiniAgent:
+    """
+    A wrapper for an agent function that allows calling the agent.
+    """
+
+    def __init__(
+        self,
+        func: AgentFunction,
+        alias: Optional[str] = None,
+        description: Optional[str] = None,
+        # TODO Oleksandr: use DEFAULT for the following two arguments (and put them into MiniAgents class)
+        uppercase_func_name: bool = True,
+        normalize_spaces_in_docstring: bool = True,
+        interaction_metadata: Optional[dict[str, Any]] = None,
+        **partial_kwargs,
+    ) -> None:
+        self._func = func
+        if partial_kwargs:
+            # NOTE: we cannot deep-copy the partial_kwargs here, because they may contain objects that are
+            # not serializable (for ex. AsyncAnthropic and AsyncOpenAI objects in case of anthropic and openai
+            # miniagents)
+            self._func = partial(func, **partial_kwargs)
+
+        # validate interaction metadata
+        # TODO Oleksandr: is `interaction_metadata` a good name ? see how it is used in Recensia to decide
+        self.interaction_metadata = Frozen(**(interaction_metadata or {}))
+        self._interact_metadata_dict = self.interaction_metadata.frozen_fields_and_values()
+
+        self.alias = alias
+        if self.alias is None:
+            self.alias = func.__name__
+            if uppercase_func_name:
+                self.alias = self.alias.upper()
+
+        self.description = description
+        if self.description is None:
+            self.description = func.__doc__
+            if self.description and normalize_spaces_in_docstring:
+                self.description = " ".join(self.description.split())
+        if self.description:
+            # replace all {AGENT_ALIAS} entries in the description with the actual agent alias
+            self.description = self.description.format(AGENT_ALIAS=self.alias)
+
+        self.__name__ = self.alias
+        self.__doc__ = self.description
+
+    def inquire(
+        self,
+        messages: Optional[MessageType] = None,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        **function_kwargs,
+    ) -> MessageSequencePromise:
+        """
+        TODO Oleksandr: docstring
+        """
+        agent_call = self.initiate_inquiry(start_asap=start_asap, **function_kwargs)
+        if messages is not None:
+            agent_call.send_message(messages)
+        return agent_call.reply_sequence()
+
+    def initiate_inquiry(
+        self,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        **function_kwargs,
+    ) -> "AgentCall":
+        """
+        Start an inquiry with the agent. The agent will be called with the provided function kwargs.
+        TODO Oleksandr: expand this docstring ?
+        """
+        input_sequence = MessageSequence(
+            start_asap=False,
+        )
+        reply_sequence = AgentReplyMessageSequence(
+            mini_agent=self,
+            function_kwargs=function_kwargs,
+            input_sequence_promise=input_sequence.sequence_promise,
+            start_asap=start_asap,
+        )
+
+        agent_call = AgentCall(
+            message_streamer=input_sequence.message_appender,
+            reply_sequence_promise=reply_sequence.sequence_promise,
+        )
+        return agent_call
+
+
+class AgentInteractionNode(Message):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    agent_alias: str
+
+
+class AgentCallNode(AgentInteractionNode):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    messages: tuple[Message, ...]
+
+
+class AgentReplyNode(AgentInteractionNode):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    agent_call: AgentCallNode
+    replies: tuple[Message, ...]
+
+
+class MessageSequence(FlatSequence[MessageType, MessagePromise]):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    message_appender: Optional[StreamAppender[MessageType]]
+    sequence_promise: MessageSequencePromise
+
+    def __init__(
+        self,
+        appender_capture_errors: Union[bool, Sentinel] = DEFAULT,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        incoming_streamer: Optional[PromiseStreamer[MessageType]] = None,
+    ) -> None:
+        if incoming_streamer:
+            # an external streamer is provided, so we don't create the default StreamAppender
+            self.message_appender = None
+        else:
+            self.message_appender = StreamAppender(capture_errors=appender_capture_errors)
+            incoming_streamer = self.message_appender
+
+        super().__init__(
+            incoming_streamer=incoming_streamer,
+            start_asap=start_asap,
+            sequence_promise_class=MessageSequencePromise,
+        )
+
+    @classmethod
+    def turn_into_sequence_promise(cls, messages: MessageType) -> MessageSequencePromise:
+        """
+        Convert an arbitrarily nested collection of messages of various types (strings, dicts, Message objects,
+        MessagePromise objects etc. - see `MessageType` definition for details) into a flat and uniform
+        MessageSequencePromise object.
+        """
+        message_sequence = cls(
+            appender_capture_errors=True,
+            start_asap=False,
+        )
+        with message_sequence.message_appender:
+            message_sequence.message_appender.append(messages)
+        return message_sequence.sequence_promise
+
+    @classmethod
+    async def aresolve_messages(cls, messages: MessageType) -> tuple[Message, ...]:
+        """
+        Convert an arbitrarily nested collection of messages of various types (strings, dicts, Message objects,
+        MessagePromise objects etc. - see `MessageType` definition for details) into a flat and uniform tuple of
+        Message objects.
+        """
+        return await cls.turn_into_sequence_promise(messages).aresolve_messages()
+
+    async def _flattener(  # pylint: disable=invalid-overridden-method
+        self, zero_or_more_items: MessageType
+    ) -> AsyncIterator[MessagePromise]:
+        if isinstance(zero_or_more_items, MessagePromise):
+            yield zero_or_more_items
+        elif isinstance(zero_or_more_items, Message):
+            yield zero_or_more_items.as_promise
+        elif isinstance(zero_or_more_items, BaseModel):
+            yield Message(**zero_or_more_items.model_dump()).as_promise
+        elif isinstance(zero_or_more_items, dict):
+            yield Message(**zero_or_more_items).as_promise
+        elif isinstance(zero_or_more_items, str):
+            yield Message(text=zero_or_more_items).as_promise
+        elif isinstance(zero_or_more_items, BaseException):
+            raise zero_or_more_items
+        elif hasattr(zero_or_more_items, "__iter__"):
+            for item in zero_or_more_items:
+                async for message_promise in self._flattener(item):
+                    yield message_promise
+        elif hasattr(zero_or_more_items, "__aiter__"):
+            async for item in zero_or_more_items:
+                async for message_promise in self._flattener(item):
+                    yield message_promise
+        else:
+            raise TypeError(f"Unexpected message type: {type(zero_or_more_items)}")
+
+
+# noinspection PyProtectedMember
+class AgentReplyMessageSequence(MessageSequence):
+    # pylint: disable=protected-access
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __init__(
+        self,
+        mini_agent: MiniAgent,
+        input_sequence_promise: MessageSequencePromise,
+        function_kwargs: dict[str, Any],
+        **kwargs,
+    ) -> None:
+        # this validates the agent function kwargs
+        self._frozen_func_kwargs = Frozen(**function_kwargs).frozen_fields_and_values()
+        self._function_kwargs = copy.deepcopy(function_kwargs)
+
+        self._mini_agent = mini_agent
+        self._input_sequence_promise = input_sequence_promise
+        super().__init__(
+            appender_capture_errors=True,  # we want `self.message_appender` not to let errors out of `run_the_agent`
+            **kwargs,
+        )
+
+    async def _streamer(self, _) -> AsyncIterator[MessagePromise]:
+        async def run_the_agent(_) -> AgentCallNode:
+            ctx = InteractionContext(
+                this_agent=self._mini_agent,
+                messages=self._input_sequence_promise,
+                reply_streamer=self.message_appender,
+            )
+            with self.message_appender:
+                # errors are not raised above this `with` block, thanks to `appender_capture_errors=True`
+                # pylint: disable=protected-access
+                # noinspection PyProtectedMember
+                await self._mini_agent._func(ctx, **self._function_kwargs)
+
+            return AgentCallNode(
+                messages=await self._input_sequence_promise.aresolve_messages(),
+                agent_alias=self._mini_agent.alias,
+                **self._mini_agent._interact_metadata_dict,
+                # NOTE: the next line will override any keys from `self.interaction_metadata` if names collide
+                **self._frozen_func_kwargs,
+            )
+
+        agent_call_promise = Promise[AgentCallNode](
+            start_asap=True,
+            resolver=run_the_agent,
+        )
+
+        async for reply_promise in super()._streamer(_):
+            yield reply_promise  # at this point all MessageType items are "flattened" into MessagePromise items
+
+        async def create_agent_reply_node(_) -> AgentReplyNode:
+            return AgentReplyNode(
+                replies=await self.sequence_promise.aresolve_messages(),
+                agent_alias=self._mini_agent.alias,
+                agent_call=await agent_call_promise,
+                **self._mini_agent._interact_metadata_dict,
+            )
+
+        Promise[AgentReplyNode](
+            start_asap=True,  # use a separate async task to avoid deadlock upon AgentReplyNode resolution
+            resolver=create_agent_reply_node,
+        )
+```
+
+
+
+miniagents/promising/errors.py
+```python
+"""
+This module contains the custom errors used in the `Promising` part of the library.
+"""
+
+
+class PromisingError(Exception):
+    """
+    Base class for errors in the `Promising` part of the library.
+    """
+
+
+class FunctionNotProvidedError(PromisingError):
+    """
+    Raised when a function that was supposed to be provided (most likely as a parameter to a class constructor)
+    was not provided.
+    """
+
+
+class AppenderNotOpenError(PromisingError):
+    """
+    Raised when an `StreamAppender` is not open for appending yet and an attempt is made to append to it.
+    """
+
+
+class AppenderClosedError(PromisingError):
+    """
+    Raised when an `StreamAppender` has already been closed for appending and an attempt is made to append to it.
+    """
+```
+
+
+
+miniagents/promising/ext/frozen.py
+```python
+"""
+The main class in this module is `Frozen`. See its docstring for more information.
+"""
+
+import hashlib
+import itertools
+import json
+from functools import cached_property
+from typing import Any, Iterator, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, model_validator
+
+FrozenType = Optional[Union[str, int, float, bool, tuple["FrozenType", ...], "Frozen"]]
+
+
+class Frozen(BaseModel):
+    """
+    A frozen pydantic model that allows arbitrary fields, has a git-style hash key that is calculated from the
+    JSON representation of its data. The data is recursively validated to be immutable. Dicts are converted to
+    `Frozen` instances, lists and tuples are converted to tuples of immutable values, sets are prohibited.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow")
+
+    class_: str
+
+    def __str__(self) -> str:
+        return self.as_string
+
+    @cached_property
+    def as_string(self) -> str:
+        """
+        Return a string representation of this model. This is usually the representation that will be used when
+        the model needs to be a part of an LLM prompts.
+        """
+        # NOTE: child classes should override the private version, `_as_string()` if they want to customize behaviour
+        return self._as_string()
+
+    @cached_property
+    def full_json(self) -> str:
+        """
+        Get the full JSON representation of this Frozen object together with all its nested objects. This is a cached
+        property, so it is calculated only the first time it is accessed.
+        """
+        return self.model_dump_json()
+
+    @cached_property
+    def serialized(self) -> str:
+        """
+        The representation of this Frozen object that you would usually get by calling `serialize()`, but as a string
+        with a JSON. This is a cached property, so it is calculated only the first time it is accessed.
+        """
+        return json.dumps(self.serialize(), ensure_ascii=False, sort_keys=True)
+
+    def serialize(self) -> dict[str, Any]:
+        """
+        Serialize the object into a dictionary. The default implementation does complete serialization of this
+        Frozen object and all its nested objects. Child classes may override this method to customize serialization
+        (e.g. externalize certain nested objects and only reference them by their hash keys - see Message).
+        """
+        return self.model_dump()
+
+    @cached_property
+    def hash_key(self) -> str:
+        """
+        Get the hash key for this object. It is a hash of the JSON representation of the object.
+        """
+        # pylint: disable=cyclic-import,import-outside-toplevel
+        from miniagents.promising.promising import PromisingContext
+
+        hash_key = hashlib.sha256(self.serialized.encode("utf-8")).hexdigest()
+        if not PromisingContext.get_current().longer_hash_keys:
+            hash_key = hash_key[:40]
+        return hash_key
+
+    def frozen_fields(self, exclude_class: bool = False) -> Iterator[str]:
+        """
+        Get the list of field names of the object. This includes the model fields (both, explicitly set and the ones
+        with default values) and the extra fields that are not part of the model.
+        """
+        if exclude_class:
+            return itertools.chain(
+                (field for field in self.model_fields if field != "class_"), self.__pydantic_extra__
+            )
+        return itertools.chain(self.model_fields, self.__pydantic_extra__)
+
+    def frozen_fields_and_values(self, exclude_class: bool = True) -> dict[str, Any]:
+        """
+        Get a dict of field names and values of this Pydantic object. This includes the model fields (both,
+        explicitly set and the ones with default values) and the extra fields that are not part of the model.
+        """
+        return dict(self._frozen_fields_and_values(exclude_class=exclude_class))
+
+    def _frozen_fields_and_values(self, exclude_class: bool) -> Iterator[tuple[str, Any]]:
+        if exclude_class:
+            for field in self.model_fields:
+                if field != "class_":
+                    yield field, getattr(self, field)
+        else:
+            for field in self.model_fields:
+                yield field, getattr(self, field)
+
+        for field, value in self.__pydantic_extra__.items():  # pylint: disable=no-member
+            yield field, value
+
+    def _as_string(self) -> str:
+        """
+        Return the message as a string. This is the method that child classes should override to customize the string
+        representation of the message for the LLM prompts.
+        """
+        return self.full_json
+
+    @classmethod
+    def _preprocess_values(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """
+        Preprocess the values before validation and freezing.
+        """
+        # TODO Oleksandr: what about saving fully qualified model name, and not just the short name ?
+        if "class_" in values:
+            if values["class_"] != cls.__name__:
+                raise ValueError(
+                    f"the `class_` field of a Frozen must be equal to its actual class name, got {values['class_']} "
+                    f"instead of {cls.__name__}"
+                )
+        else:
+            values = {"class_": cls.__name__, **values}
+        return values
+
+    # noinspection PyNestedDecorators
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_and_freeze_values(cls, values: dict[str, Any]) -> dict[str, FrozenType]:
+        """
+        Recursively make sure that the field values of the object are immutable and of allowed types.
+        """
+        values = cls._preprocess_values(values)
+        return {key: cls._validate_and_freeze_value(key, value) for key, value in values.items()}
+
+    @classmethod
+    def _validate_and_freeze_value(cls, key: str, value: Any) -> FrozenType:
+        """
+        Recursively make sure that the field value is immutable and of allowed type.
+        """
+        if isinstance(value, (tuple, list)):
+            return tuple(cls._validate_and_freeze_value(key, sub_value) for sub_value in value)
+        if isinstance(value, dict):
+            return Frozen(**value)
+        if not isinstance(value, cls._allowed_value_types()):
+            raise ValueError(
+                f"only {{{', '.join([t.__name__ for t in cls._allowed_value_types()])}}} "
+                f"are allowed as field values in {cls.__name__}, got {type(value).__name__} in `{key}`"
+            )
+        return value
+
+    @classmethod
+    def _allowed_value_types(cls) -> tuple[type[Any], ...]:
+        return type(None), str, int, float, bool, tuple, list, dict, Frozen
+```
+
+
+
+miniagents/promising/promise_typing.py
+```python
+"""
+Types of the Promising part of the library.
+"""
+
+from typing import TypeVar, AsyncIterator, Protocol, Union, Any
+
+T = TypeVar("T")
+PIECE = TypeVar("PIECE")
+WHOLE = TypeVar("WHOLE")
+IN = TypeVar("IN")
+OUT = TypeVar("OUT")
+PromiseBound = TypeVar("PromiseBound", bound="Promise")
+StreamedPromiseBound = TypeVar("StreamedPromiseBound", bound="StreamedPromise")
+FlatSequenceBound = TypeVar("FlatSequenceBound", bound="FlatSequence")
+
+
+class PromiseResolver(Protocol[T]):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    async def __call__(self, promise: PromiseBound) -> T: ...
+
+
+class PromiseStreamer(Protocol[PIECE]):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __call__(self, streamed_promise: StreamedPromiseBound) -> AsyncIterator[PIECE]: ...
+
+
+class PromiseResolvedEventHandler(Protocol):
+    """
+    A protocol for Promise resolution event handlers. A promise resolution event handler is a function that is
+    scheduled to be called after Promise.aresolve() finishes resolving the promise. "Scheduled" means that the
+    function is passed to the async event loop for execution without blocking the current coroutine.
+    """
+
+    async def __call__(self, promise: PromiseBound, result: Any) -> None: ...
+
+
+class SequenceFlattener(Protocol[IN, OUT]):
+    """
+    A protocol for sequence flatteners. A sequence flattener is a function that takes a single object of type `IN`
+    and asynchronously converts it into zero or more objects of type `OUT`. In other words, it "flattens" a single
+    `IN` into zero or more instances of `OUT`.
+    """
+
+    def __call__(
+        self, flat_sequence: FlatSequenceBound, zero_or_more_items: Union[IN, BaseException]
+    ) -> AsyncIterator[OUT]: ...
+```
+
+
+
+miniagents/promising/promising.py
+```python
+"""
+The main class in this module is `StreamedPromise`. See its docstring for more information.
+"""
+
+import asyncio
+import contextvars
+import logging
+from asyncio import Task
+from contextvars import ContextVar
+from functools import partial
+from types import TracebackType
+from typing import Generic, AsyncIterator, Union, Optional, Iterable, Awaitable, Any
+
+from miniagents.promising.errors import AppenderClosedError, AppenderNotOpenError, FunctionNotProvidedError
+from miniagents.promising.promise_typing import (
+    T,
+    PIECE,
+    WHOLE,
+    PromiseStreamer,
+    PromiseResolvedEventHandler,
+    PromiseResolver,
+)
+from miniagents.promising.sentinels import Sentinel, NO_VALUE, FAILED, END_OF_QUEUE, DEFAULT
+
+logger = logging.getLogger(__name__)
+
+
+class PromisingContext:
+    """
+    This is the main class for managing the context of promises. It is a context manager that is used to configure
+    default settings for promises and to handle the lifecycle of promises (attach `on_promise_resolved` handlers,
+    ensure that all the async tasks finish before this context manager exits).
+    """
+
+    _current: ContextVar[Optional["PromisingContext"]] = ContextVar("PromisingContext._current", default=None)
+
+    def __init__(
+        self,
+        start_everything_asap_by_default: bool = True,
+        appenders_capture_errors_by_default: bool = False,
+        longer_hash_keys: bool = False,
+        log_level_for_errors: int = logging.ERROR,
+        on_promise_resolved: Union[PromiseResolvedEventHandler, Iterable[PromiseResolvedEventHandler]] = (),
+    ) -> None:
+        self.parent = self._current.get()
+
+        self.on_promise_resolved_handlers: list[PromiseResolvedEventHandler] = (
+            [on_promise_resolved] if callable(on_promise_resolved) else [*on_promise_resolved]
+        )
+        self.child_tasks: set[Task] = set()
+
+        self.start_everything_asap_by_default = start_everything_asap_by_default
+        self.appenders_capture_errors_by_default = appenders_capture_errors_by_default
+        self.longer_hash_keys = longer_hash_keys
+        self.log_level_for_errors = log_level_for_errors
+
+        self._previous_ctx_token: Optional[contextvars.Token] = None
+
+    @classmethod
+    def get_current(cls) -> "PromisingContext":
+        """
+        Get the current context. If no context is currently active, raise an error.
+        """
+        current = cls._current.get()
+        if not current:
+            raise RuntimeError(
+                f"No {cls.__name__} is currently active. Did you forget to do `async with {cls.__name__}():`?"
+            )
+        if not isinstance(current, cls):
+            raise TypeError(
+                f"You seem to have done `async with {type(current).__name__}():` (or similar), "
+                f"but `async with {cls.__name__}():` is expected instead."
+            )
+        return current
+
+    def on_promise_resolved(self, handler: PromiseResolvedEventHandler) -> PromiseResolvedEventHandler:
+        """
+        Add a handler to be called after a promise is resolved.
+        """
+        self.on_promise_resolved_handlers.append(handler)
+        return handler
+
+    def start_asap(
+        self,
+        awaitable: Awaitable,
+        suppress_errors: bool = False,
+        log_level_for_errors: int = logging.DEBUG,
+    ) -> Task:
+        """
+        Schedule a task in the current context. "Scheduling" a task this way instead of just creating it with
+        `asyncio.create_task()` allows the context to keep track of the child tasks and to wait for them to finish
+        before finalizing the context.
+        """
+
+        async def awaitable_wrapper() -> Any:
+            # pylint: disable=broad-except
+            # noinspection PyBroadException
+            try:
+                return await awaitable
+            except Exception:
+                logger.log(
+                    log_level_for_errors,
+                    "AN ERROR OCCURRED IN AN ASYNC BACKGROUND TASK",
+                    exc_info=True,
+                )
+                if not suppress_errors:
+                    raise
+            except BaseException:
+                if not suppress_errors:
+                    raise
+            finally:
+                self.child_tasks.remove(task)
+
+        task = asyncio.create_task(awaitable_wrapper())
+        self.child_tasks.add(task)
+        return task
+
+    def activate(self) -> "PromisingContext":
+        """
+        Activate the context. This is a context manager method that is used to activate the context for the duration
+        of the `async with` block. Can be called as a regular method as well in cases where it is not possible to use
+        the `async with` block (e.g., if a PromisingContext needs to be activated for the duration of an async webserver
+        being up).
+        """
+        if self._previous_ctx_token:
+            raise RuntimeError("PromisingContext is not reentrant")
+        self._previous_ctx_token = self._current.set(self)  # <- this is the context switch
+        return self
+
+    async def aflush_tasks(self) -> None:
+        """
+        Wait for all the child tasks to finish. This is useful when you want to wait for all the child tasks to finish
+        before proceeding with the rest of the code.
+        """
+        while self.child_tasks:
+            await asyncio.gather(
+                *self.child_tasks,
+                return_exceptions=True,  # this prevents waiting until the first exception and then giving up
+            )
+
+    async def afinalize(self) -> None:
+        """
+        Finalize the context (wait for all the child tasks to finish and reset the context). This method is called
+        automatically at the end of the `async with` block.
+        """
+        await self.aflush_tasks()
+        self._current.reset(self._previous_ctx_token)
+        self._previous_ctx_token = None
+
+    async def __aenter__(self) -> "PromisingContext":
+        return self.activate()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.afinalize()
+
+
+class Promise(Generic[T]):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    def __init__(
+        self,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        resolver: Optional[PromiseResolver[T]] = None,
+        prefill_result: Union[Optional[T], Sentinel] = NO_VALUE,
+    ) -> None:
+        # TODO Oleksandr: raise an error if both prefill_result and resolver are set (or both are not set)
+        promising_context = PromisingContext.get_current()
+
+        if start_asap is DEFAULT:
+            start_asap = promising_context.start_everything_asap_by_default
+
+        if resolver:
+            self._resolver = partial(resolver, self)
+
+        if prefill_result is NO_VALUE:
+            # NO_VALUE is used because `None` is also a legitimate value
+            self._result: Union[T, Sentinel, BaseException] = NO_VALUE
+        else:
+            self._result = prefill_result
+            self._trigger_promise_resolved_event()
+
+        self._resolver_lock = asyncio.Lock()
+
+        if start_asap and prefill_result is NO_VALUE:
+            promising_context.start_asap(
+                self, suppress_errors=True, log_level_for_errors=promising_context.log_level_for_errors
+            )
+
+    async def _resolver(self) -> T:  # pylint: disable=method-hidden
+        raise FunctionNotProvidedError(
+            "The `resolver` function should be provided either via the constructor "
+            "or by subclassing the `Promise` class."
+        )
+
+    async def aresolve(self) -> T:
+        """
+        TODO Oleksandr: docstring
+        """
+        # TODO Oleksandr: put a deadlock prevention mechanism in place, i. e. find a way to disallow calling
+        #  `aresolve()` from within the `resolver` function
+        if self._result is NO_VALUE:
+            async with self._resolver_lock:
+                if self._result is NO_VALUE:
+                    try:
+                        self._result = await self._resolver()
+                    except BaseException as exc:  # pylint: disable=broad-except
+                        logger.debug("An error occurred while resolving a Promise", exc_info=True)
+                        self._result = exc
+
+                    self._trigger_promise_resolved_event()
+
+        if isinstance(self._result, BaseException):
+            raise self._result
+        return self._result
+
+    def __await__(self):
+        return self.aresolve().__await__()
+
+    def _trigger_promise_resolved_event(self):
+        promising_context = PromisingContext.get_current()
+        while promising_context:
+            for handler in promising_context.on_promise_resolved_handlers:
+                promising_context.start_asap(
+                    handler(self, self._result),
+                    suppress_errors=True,
+                    log_level_for_errors=promising_context.log_level_for_errors,
+                )
+            promising_context = promising_context.parent
+
+
+class StreamedPromise(Generic[PIECE, WHOLE], Promise[WHOLE]):
+    """
+    A StreamedPromise represents a promise of a whole value that can be streamed piece by piece.
+
+    The StreamedPromise allows for "replaying" the stream of pieces without involving the `streamer`
+    function for the pieces that have already been produced. This means that multiple consumers can
+    iterate over the stream independently, and each consumer will receive all the pieces from the
+    beginning, even if some pieces were produced before the consumer started iterating over the
+    promise.
+
+    :param streamer: A callable that returns an async iterator yielding the pieces of the whole value.
+    :param resolver: A callable that takes an async iterable of pieces and returns the whole value
+                     ("packages" the pieces).
+    TODO Oleksandr: explain the `start_asap` parameter
+    TODO Oleksandr: this is one of the central classes of the framework, hence the docstring should be
+     much more detailed
+    """
+
+    def __init__(
+        self,
+        streamer: Optional[PromiseStreamer[PIECE]] = None,
+        prefill_pieces: Union[Optional[Iterable[PIECE]], Sentinel] = NO_VALUE,
+        resolver: Optional[PromiseResolver[T]] = None,
+        prefill_result: Union[Optional[T], Sentinel] = NO_VALUE,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+    ) -> None:
+        # TODO Oleksandr: raise an error if both prefill_pieces and streamer are set (or both are not set)
+        promising_context = PromisingContext.get_current()
+
+        if start_asap is DEFAULT:
+            start_asap = promising_context.start_everything_asap_by_default
+
+        super().__init__(
+            start_asap=start_asap,
+            resolver=resolver,
+            prefill_result=prefill_result,
+        )
+
+        if streamer:
+            self._streamer = partial(streamer, self)
+
+        if prefill_pieces is NO_VALUE:
+            self._pieces_so_far: list[Union[PIECE, BaseException]] = []
+        else:
+            self._pieces_so_far: list[Union[PIECE, BaseException]] = [*prefill_pieces, StopAsyncIteration()]
+
+        self._all_pieces_consumed = prefill_pieces is not NO_VALUE
+        self._streamer_lock = asyncio.Lock()
+
+        if start_asap and prefill_pieces is NO_VALUE:
+            # start producing pieces at the earliest task switch (put them in a queue for further consumption)
+            self._queue = asyncio.Queue()
+            promising_context.start_asap(
+                self._aconsume_the_stream(),
+                suppress_errors=True,
+                log_level_for_errors=promising_context.log_level_for_errors,
+            )
+        else:
+            # each piece will be produced on demand (when the first consumer iterates over it and not earlier)
+            self._queue = None
+
+        self._streamer_aiter: Union[Optional[AsyncIterator[PIECE]], Sentinel] = None
+
+    def _streamer(self) -> AsyncIterator[PIECE]:  # pylint: disable=method-hidden
+        raise FunctionNotProvidedError(
+            "The `streamer` function should be provided either via the constructor "
+            "or by subclassing the `StreamedPromise` class."
+        )
+
+    def __aiter__(self) -> AsyncIterator[PIECE]:
+        """
+        This allows to consume the stream piece by piece. Each new iterator returned by `__aiter__` will replay
+        the stream from the beginning.
+        """
+        return self._StreamReplayIterator(self)
+
+    def __call__(self, *args, **kwargs) -> AsyncIterator[PIECE]:
+        """
+        This enables the `StreamedPromise` to be used as a piece streamer for another `StreamedPromise`, effectively
+        chaining them together.
+        """
+        return self.__aiter__()
+
+    async def _aconsume_the_stream(self) -> None:
+        while True:
+            piece = await self._streamer_aiter_anext()
+            self._queue.put_nowait(piece)
+            if isinstance(piece, StopAsyncIteration):
+                break
+
+    async def _streamer_aiter_anext(self) -> Union[PIECE, BaseException]:
+        # pylint: disable=broad-except
+        if self._streamer_aiter is None:
+            try:
+                self._streamer_aiter = self._streamer()
+                # noinspection PyUnresolvedReferences
+                if not callable(self._streamer_aiter.__anext__):
+                    raise TypeError("The streamer must return an async iterator")
+            except BaseException as exc:
+                logger.debug("An error occurred while instantiating a streamer for a StreamedPromise", exc_info=True)
+                self._streamer_aiter = FAILED
+                return exc
+
+        elif self._streamer_aiter is FAILED:
+            # we were not able to instantiate the streamer iterator at all - stopping the stream
+            return StopAsyncIteration()
+
+        try:
+            return await self._streamer_aiter.__anext__()
+        except BaseException as exc:
+            if not isinstance(exc, StopAsyncIteration):
+                logger.debug(
+                    'An error occurred while fetching a single "piece" of a StreamedPromise from its pieces streamer.',
+                    exc_info=True,
+                )
+            # Any exception, apart from `StopAsyncIteration`, will always be stored in the `_pieces_so_far` list
+            # before the `StopAsyncIteration` and will not conclude the list (in other words, `StopAsyncIteration`
+            # will always conclude the `_pieces_so_far` list). This is because if you keep iterating over an
+            # iterator/generator past any other exception that it might raise, it is still supposed to raise
+            # `StopAsyncIteration` at the end.
+            return exc
+
+    class _StreamReplayIterator(AsyncIterator[PIECE]):
+        """
+        The pieces that have already been "produced" are stored in the `_pieces_so_far` attribute of the parent
+        `StreamedPromise`. The `_StreamReplayIterator` first yields the pieces from `_pieces_so_far`, and then it
+        continues to retrieve new pieces from the original streamer of the parent `StreamedPromise`
+        (`_streamer_aiter` attribute of the parent `StreamedPromise`).
+        """
+
+        def __init__(self, streamed_promise: "StreamedPromise") -> None:
+            self._streamed_promise = streamed_promise
+            self._index = 0
+
+        async def __anext__(self) -> PIECE:
+            if self._index < len(self._streamed_promise._pieces_so_far):
+                # "replay" a piece that was produced earlier
+                piece = self._streamed_promise._pieces_so_far[self._index]
+            elif self._streamed_promise._all_pieces_consumed:
+                # we know that `StopAsyncIteration` was stored as the last piece in the piece list
+                raise self._streamed_promise._pieces_so_far[-1]
+            else:
+                async with self._streamed_promise._streamer_lock:
+                    if self._index < len(self._streamed_promise._pieces_so_far):
+                        piece = self._streamed_promise._pieces_so_far[self._index]
+                    else:
+                        piece = await self._real_anext()
+
+            self._index += 1
+
+            if isinstance(piece, BaseException):
+                raise piece
+            return piece
+
+        async def _real_anext(self) -> Union[PIECE, BaseException]:
+            # pylint: disable=protected-access
+            if self._streamed_promise._queue is None:
+                # the stream is being produced on demand, not beforehand (`start_asap` is False)
+                piece = await self._streamed_promise._streamer_aiter_anext()
+            else:
+                # the stream is being produced beforehand (`start_asap` is True)
+                piece = await self._streamed_promise._queue.get()
+
+            if isinstance(piece, StopAsyncIteration):
+                # `StopAsyncIteration` will be stored as the last piece in the piece list
+                self._streamed_promise._all_pieces_consumed = True
+
+            self._streamed_promise._pieces_so_far.append(piece)
+            return piece
+
+
+class StreamAppender(Generic[PIECE], AsyncIterator[PIECE]):
+    """
+    This is a special kind of `streamer` that can be fed into `StreamedPromise` constructor. Objects of this class
+    implement the context manager protocol and an `append()` method, which allows for passing such an object into
+    `StreamedPromise` constructor while also keeping a reference to it in the outside code in order to `feed` the
+    pieces into it (and, consequently, into the `StreamedPromise`) later using `append()`.
+    TODO Oleksandr: explain the `capture_errors` parameter
+    """
+
+    def __init__(self, capture_errors: Union[bool, Sentinel] = DEFAULT) -> None:
+        self._queue = asyncio.Queue()
+        self._append_open = False
+        self._append_closed = False
+        if capture_errors is DEFAULT:
+            self._capture_errors = PromisingContext.get_current().appenders_capture_errors_by_default
+        else:
+            self._capture_errors = capture_errors
+
+    def __enter__(self) -> "StreamAppender":
+        return self.open()
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> bool:
+        is_append_closed_error = isinstance(exc_value, AppenderClosedError)
+        error_should_not_propagate = self._capture_errors and not is_append_closed_error
+
+        if exc_value and error_should_not_propagate:
+            logger.debug("An error occurred while appending pieces to a StreamAppender", exc_info=exc_value)
+            self.append(exc_value)
+        self.close()
+
+        # if `capture_errors` is True, then we also return True, so that the exception is not propagated outside
+        # the `with` block (except if the error is an `AppenderClosedError` - in this case, we do not suppress it)
+        return error_should_not_propagate
+
+    def append(self, piece: PIECE) -> "StreamAppender":
+        """
+        Append a `piece` to the streamer. This method can only be called when the streamer is open for appending (and
+        also not closed yet). Consequently, the `piece` is delivered to the `StreamedPromise` that is consuming from
+        this streamer.
+        """
+        if not self._append_open:
+            raise AppenderNotOpenError(
+                "You need to put the `append()` operation inside a `with StreamAppender()` block "
+                "(or call `open()` and `close()` manually)."
+            )
+        if self._append_closed:
+            raise AppenderClosedError("The StreamAppender has already been closed for appending.")
+        self._queue.put_nowait(piece)
+        return self
+
+    def open(self) -> "StreamAppender":
+        """
+        Open the streamer for appending.
+
+        ATTENTION! It is highly recommended to use the `with` statement instead of calling `open()` and `close()`
+        manually.
+
+        Forgetting to call `close()` or not calling it due to an exception will result in `StreamedPromise`
+        (and the code that is consuming from it) waiting for more `pieces` forever.
+        """
+        if self._append_closed:
+            raise AppenderClosedError("Once closed, the StreamAppender cannot be opened again.")
+        self._append_open = True
+        return self
+
+    def close(self) -> None:
+        """
+        Close the streamer after all the pieces have been appended.
+
+        ATTENTION! It is highly recommended to use the `with` statement instead of calling `open()` and `close()`
+        manually.
+
+        Forgetting to call `close()` or not calling it due to an exception will result in `StreamedPromise`
+        (and the code that is consuming from it) waiting for more `pieces` forever.
+        """
+        if self._append_closed:
+            return
+        self._append_closed = True
+        self._queue.put_nowait(END_OF_QUEUE)
+
+    async def __anext__(self) -> PIECE:
+        if self._queue is None:
+            raise StopAsyncIteration()
+
+        piece = await self._queue.get()
+        if piece is END_OF_QUEUE:
+            self._queue = None
+            raise StopAsyncIteration()
+
+        return piece
+
+    def __call__(self, *args, **kwargs) -> AsyncIterator[PIECE]:
+        return self
+```
+
+
+
+miniagents/promising/sentinels.py
+```python
+"""
+See the docstring of the `Sentinel` class for more information.
+"""
+
+
+class Sentinel:
+    """
+    A sentinel object that is used indicate things like NO_VALUE (when None is considered a value), DEFAULT, etc.
+    """
+
+    def __bool__(self) -> bool:
+        raise RuntimeError("Sentinels should not be used in boolean expressions.")
+
+
+NO_VALUE = Sentinel()
+DEFAULT = Sentinel()
+FAILED = Sentinel()
+END_OF_QUEUE = Sentinel()
+AWAIT = Sentinel()
+CLEAR = Sentinel()
+```
+
+
+
+miniagents/promising/sequence.py
+```python
+"""
+The main class in this module is `FlatSequence`. See its docstring for more information.
+"""
+
+from functools import partial
+from typing import Generic, AsyncIterator, Union, Optional
+
+from miniagents.promising.errors import FunctionNotProvidedError
+from miniagents.promising.promise_typing import SequenceFlattener, IN, OUT, PromiseStreamer
+from miniagents.promising.promising import StreamedPromise
+from miniagents.promising.sentinels import Sentinel, DEFAULT
+
+
+class FlatSequence(Generic[IN, OUT]):
+    """
+    TODO Oleksandr: docstring
+    """
+
+    sequence_promise: StreamedPromise[OUT, tuple[OUT, ...]]
+
+    def __init__(
+        self,
+        incoming_streamer: PromiseStreamer[IN],
+        flattener: Optional[SequenceFlattener[IN, OUT]] = None,
+        start_asap: Union[bool, Sentinel] = DEFAULT,
+        sequence_promise_class: type[StreamedPromise[OUT, tuple[OUT, ...]]] = StreamedPromise[OUT, tuple[OUT, ...]],
+    ) -> None:
+        if flattener:
+            self._flattener = partial(flattener, self)
+
+        self._input_promise = StreamedPromise(
+            streamer=self._streamer,
+            resolver=lambda _: None,
+            start_asap=False,
+        )
+        # TODO Oleksandr: should I really pass `self` here ? it is not of type `StreamedPromiseBound`
+        self._incoming_streamer_aiter = incoming_streamer(self)
+
+        self.sequence_promise = sequence_promise_class(
+            streamer=self._input_promise,
+            resolver=self._resolver,
+            start_asap=start_asap,
+        )
+
+    def _flattener(self, zero_or_more_items: IN) -> AsyncIterator[OUT]:  # pylint: disable=method-hidden
+        # TODO Oleksandr: come up with a different method name ?
+        raise FunctionNotProvidedError(
+            "The `flattener` function should be provided either via the constructor "
+            "or by subclassing the `FlatSequence` class."
+        )
+
+    async def _streamer(self, _) -> AsyncIterator[OUT]:
+        async for zero_or_more_items in self._incoming_streamer_aiter:
+            async for item in self._flattener(zero_or_more_items):
+                yield item
+
+    async def _resolver(self, _) -> tuple[OUT, ...]:
+        return tuple([item async for item in self.sequence_promise])  # pylint: disable=consider-using-generator
+```
+
+
+
+miniagents/utils.py
+```python
+"""
+Utility functions of the MiniAgents framework.
+"""
+
+import logging
+from typing import AsyncIterator, Any, Optional, Union, Iterable, Callable
+
+from pydantic._internal._model_construction import ModelMetaclass
+
+from miniagents.messages import MessageSequencePromise
+from miniagents.miniagents import MessageType, MessageSequence, MessagePromise, Message, MiniAgent
+from miniagents.promising.promising import StreamAppender
+from miniagents.promising.sentinels import Sentinel, DEFAULT, AWAIT, CLEAR
+
+logger = logging.getLogger(__name__)
+
+
+async def adialog_loop(
+    user_agent: Union[MiniAgent, Callable[[MessageType, ...], MessageSequencePromise], Sentinel],
+    assistant_agent: Union[MiniAgent, Callable[[MessageType, ...], MessageSequencePromise], Sentinel],
+) -> None:
+    """
+    Run a loop that chains the user agent and the assistant agent in a dialog.
+    """
+    await achain_loop(
+        [
+            user_agent,
+            AWAIT,  # TODO Oleksandr: explain this with an inline comment like this one
+            assistant_agent,
+        ]
+    )
+
+
+async def achain_loop(
+    agents: Iterable[Union[MiniAgent, Callable[[MessageType, ...], MessageSequencePromise], Sentinel]],
+    initial_input: Optional[MessageType] = None,
+) -> None:
+    """
+    Run a loop that chains the agents together.
+    """
+    agents = list(agents)
+    if not any(agent is AWAIT for agent in agents):
+        raise ValueError(
+            "There should be at least one AWAIT sentinel in the list of agents in order for the loop not to "
+            "schedule the turns infinitely without actually running them."
+        )
+
+    messages = initial_input
+    while True:
+        for agent in agents:
+            if agent is AWAIT:
+                if isinstance(messages, MessageSequencePromise):
+                    # all the interactions happen here (here all the scheduled promises are awaited for)
+                    messages = await messages.aresolve_messages()
+            elif agent is CLEAR:
+                messages = None
+            elif callable(agent):
+                messages = agent(messages)
+            elif isinstance(agent, MiniAgent):
+                messages = agent.inquire(messages)
+            else:
+                raise ValueError(f"Invalid agent: {agent}")
+    # TODO Oleksandr: How should agents end the loop ? What message sequence should this utility return when the
+    #  loop is over ?
+
+
+def join_messages(
+    messages: MessageType,
+    delimiter: Optional[str] = "\n\n",
+    strip_leading_newlines: bool = False,
+    reference_original_messages: bool = True,
+    start_asap: Union[bool, Sentinel] = DEFAULT,  # TODO Oleksandr: why not just make it False ?
+    **message_metadata,
+) -> MessagePromise:
+    """
+    Join multiple messages into a single message using a delimiter.
+
+    :param messages: Messages to join.
+    :param delimiter: A string that will be inserted between messages.
+    :param strip_leading_newlines: If True, leading newlines will be stripped from each message. Language models,
+    when prompted in a certain way, may produce leading newlines in the response. This parameter allows you to
+    remove them.
+    :param reference_original_messages: If True, the resulting message will contain the list of original messages in
+    the `original_messages` field.
+    :param start_asap: If True, the resulting message will be scheduled for background resolution regardless
+    of when it is going to be consumed.
+    :param message_metadata: Additional metadata to be added to the resulting message.
+    """
+
+    async def token_streamer(metadata_so_far: dict[str, Any]) -> AsyncIterator[str]:
+        metadata_so_far.update(message_metadata)
+        if reference_original_messages:
+            metadata_so_far["original_messages"] = []
+
+        first_message = True
+        async for message_promise in MessageSequence.turn_into_sequence_promise(messages):
+            # TODO Oleksandr: accumulate metadata from all the messages !!!
+            if delimiter and not first_message:
+                yield delimiter
+
+            lstrip_newlines = strip_leading_newlines
+            async for token in message_promise:
+                if lstrip_newlines:
+                    # let's remove leading newlines from the first message
+                    token = token.lstrip("\n\r")
+                if token:
+                    lstrip_newlines = False  # non-empty token was found - time to stop stripping newlines
+                    yield token
+
+            if reference_original_messages:
+                metadata_so_far["original_messages"].append(await message_promise)
+
+            first_message = False
+
+    return Message.promise(
+        message_token_streamer=token_streamer,
+        start_asap=start_asap,
+    )
+
+
+def split_messages(  # TODO Oleksandr: move this function into some kind of `experimental` module ?
+    messages: MessageType,
+    delimiter: str = "\n\n",
+    code_block_delimiter: Optional[str] = "```",
+    start_asap: Union[bool, Sentinel] = DEFAULT,
+    **message_metadata,
+) -> MessageSequencePromise:
+    """
+    TODO Oleksandr: docstring
+    """
+
+    # pylint: disable=not-context-manager,too-many-statements
+
+    # TODO Oleksandr: convert this function into a class ?
+    # TODO Oleksandr: simplify this function somehow ? it is not going to be easy to understand later
+    # TODO Oleksandr: but cover it with unit tests first
+    async def sequence_streamer(_) -> AsyncIterator[MessagePromise]:
+        text_so_far = ""
+        current_text_appender: Optional[StreamAppender[str]] = None
+        inside_code_block = False
+
+        def is_text_so_far_not_empty() -> bool:
+            return bool(text_so_far.replace(delimiter, ""))
+
+        def split_text_if_needed() -> bool:
+            nonlocal text_so_far, current_text_appender, inside_code_block
+
+            delimiter_idx = -1 if inside_code_block else text_so_far.find(delimiter)
+            delimiter_len = len(delimiter)
+
+            code_delimiter_idx = text_so_far.find(
+                code_block_delimiter,
+                len(code_block_delimiter) if inside_code_block else 0,  # skip the opening delimiter if we're inside
+            )
+            if code_delimiter_idx > -1 and (delimiter_idx < 0 or code_delimiter_idx < delimiter_idx):
+                delimiter_len = 0  # we want to include the code block delimiters into the text of the code message
+                if inside_code_block:
+                    delimiter_idx = code_delimiter_idx + len(code_block_delimiter)
+                else:
+                    delimiter_idx = code_delimiter_idx
+                inside_code_block = not inside_code_block
+
+            if delimiter_idx < 0:
+                return False
+
+            text = text_so_far[:delimiter_idx]
+            text_so_far = text_so_far[delimiter_idx + delimiter_len :]
+            if text:
+                with current_text_appender:
+                    current_text_appender.append(text)
+                current_text_appender = None
+            return True
+
+        def start_new_message_promise() -> MessagePromise:
+            nonlocal current_text_appender
+            current_text_appender = StreamAppender[str]()
+
+            async def token_streamer(metadata_so_far: dict[str, Any]) -> AsyncIterator[str]:
+                metadata_so_far.update(message_metadata)
+                async for token in current_text_appender:
+                    yield token
+
+            return Message.promise(
+                message_token_streamer=token_streamer,
+                start_asap=start_asap,
+            )
+
+        try:
+            if not current_text_appender:
+                # we already know that there will be at least one message - time to make a promise
+                yield start_new_message_promise()
+
+            async for token in join_messages(
+                messages,
+                delimiter=delimiter,
+                reference_original_messages=False,
+                start_asap=start_asap,
+            ):
+                text_so_far += token
+
+                while True:
+                    # TODO Oleksandr: this loop doesn't really work when we are not in streaming mode (when the whole
+                    #  message is available at once) - only the first and the last paragraph is returned, middle
+                    #  paragraphs are lost
+                    if not current_text_appender and is_text_so_far_not_empty():
+                        # previous message was already sent - we need to start a new one (make a new promise)
+                        yield start_new_message_promise()
+                    if not split_text_if_needed():
+                        # repeat splitting until no more splitting is happening anymore in the text that we have so far
+                        break
+
+            if is_text_so_far_not_empty():
+                # some text still remains after all the messages have been processed
+                if current_text_appender:
+                    with current_text_appender:
+                        current_text_appender.append(text_so_far)
+                else:
+                    yield Message(text=text_so_far, **message_metadata).as_promise
+
+        except BaseException as exc:  # pylint: disable=broad-except
+            logger.debug("Error while processing a message sequence inside `split_messages`", exc_info=True)
+            if current_text_appender:
+                with current_text_appender:
+                    # noinspection PyTypeChecker
+                    current_text_appender.append(exc)  # TODO Oleksandr: update StreamAppender's signature ?
+            else:
+                raise exc
+        finally:
+            if current_text_appender:
+                # in case of an exception and the last MessagePromise "still hanging"
+                current_text_appender.close()
+
+    async def sequence_resolver(sequence_promise: MessageSequencePromise) -> tuple[MessagePromise, ...]:
+        return tuple([item async for item in sequence_promise])  # pylint: disable=consider-using-generator
+
+    return MessageSequencePromise(
+        streamer=sequence_streamer,
+        resolver=sequence_resolver,
+        start_asap=True,  # allowing it to ever be False results in a deadlock
+    )
+
+
+class SingletonMeta(type):
+    """
+    A metaclass that ensures that only one instance of a certain class is created.
+    NOTE: This metaclass is designed to work in asynchronous environments, hence we didn't bother making
+    it thread-safe (people typically don't mix multithreading and asynchronous paradigms together).
+    """
+
+    def __call__(cls):
+        if not hasattr(cls, "_instance"):
+            cls._instance = super().__call__()
+        return cls._instance
+
+
+class Singleton(metaclass=SingletonMeta):
+    """
+    A class that ensures that only one instance of a certain class is created.
+    """
+
+
+class ModelSingletonMeta(ModelMetaclass, SingletonMeta):
+    """
+    A metaclass that ensures that only one instance of a Pydantic model of a certain class is created.
+    TODO Oleksandr: check if this class works at all
+    """
+
+
+class ModelSingleton(metaclass=ModelSingletonMeta):
+    """
+    A class that ensures that only one instance of a Pydantic model of a certain class is created.
+    """
+```
+
+
+
+pyproject.toml
+```
+[tool.black]
+line-length = 119
+
+[tool.coverage.run]
+branch = true
+
+[tool.poetry]
+name = "miniagents"
+version = "0.0.14"
+description = """\
+An asynchronous framework for building LLM-based multi-agent systems in Python, with a focus on immutable messages \
+and token streaming.\
+"""
+authors = ["Oleksandr Tereshchenko <toporok@gmail.com>"]
+homepage = "https://github.com/teremterem/MiniAgents"
+readme = "README.md"
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.9,<4.0"
+pydantic = ">=2.0.0,<3.0.0"
+
+[tool.poetry.dev-dependencies]
+anthropic = "*"
+black = "*"
+ipython = "*"
+jupyterlab = "*"
+markdown-it-py = "*"
+notebook = "*"
+openai = "*"
+pre-commit = "*"
+# promptlayer = "*"
+pylint = "*"
+pytest = "*"
+pytest-asyncio = "*"
+pytest-cov = "*"
+python-dotenv = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+```
