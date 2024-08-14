@@ -4,10 +4,9 @@ A conversation example between the user and multiple LLMs using the MiniAgents f
 
 import sys
 from pathlib import Path
-from typing import Union
+from typing import Optional
 
 from dotenv import load_dotenv
-
 from miniagents import InteractionContext, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop
 from miniagents.ext.agents.history_agents import markdown_llm_logger_agent
@@ -46,9 +45,7 @@ ALT_MODEL_AGENTS = {model: MODEL_AGENTS[model] for model in MODEL_AGENTS if mode
 
 
 @miniagent
-async def versatilis(
-    ctx: InteractionContext,
-) -> None:
+async def versatilis(ctx: InteractionContext, file_path_prefix: str) -> None:
     """
     This agent employs many models to answer to the user. The answers of the "favourite" model are considered part of
     the "official" chat history, while the answers of the other models are just written to separate markdown files.
@@ -68,13 +65,13 @@ async def versatilis(
                         "console_style": console_style,
                     },
                 ),
-                history_md_file=str(VERSATILIS_FOLDER / f"ALT__{model}.md"),
+                history_md_file=str(f"{file_path_prefix}ALT__{model}.md"),
                 ignore_no_history=True,  # the local history agent should still write the ignored messages to the file
             )
         )
 
 
-async def amain(file_path: Union[str, Path, None] = None) -> None:
+async def amain(file_path: Optional[str] = None) -> None:
     """
     The main conversation loop.
     """
@@ -83,16 +80,18 @@ async def amain(file_path: Union[str, Path, None] = None) -> None:
         prompt = file_path.read_text(encoding="utf-8")
         print()
         print(prompt)
+        file_path_prefix = f"{file_path}."
     else:
         prompt = None
+        file_path_prefix = ""
 
     dialog_loop.kick_off(
         prompt,
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
-            history_agent=MarkdownHistoryAgent.fork(history_md_file=str(VERSATILIS_FOLDER / "CHAT.md"))
+            history_agent=MarkdownHistoryAgent.fork(history_md_file=f"{file_path_prefix}CHAT.md")
         ),
-        assistant_agent=versatilis,
+        assistant_agent=versatilis.fork(file_path_prefix=file_path_prefix),
     )
 
 
@@ -100,6 +99,8 @@ def main() -> None:
     """
     The main conversation loop.
     """
+    # TODO Oleksandr: create `.versatilis/` folder in user's home directory if it doesn't exist
+    # TODO Oleksandr: support a CLI argument that initializes a local `.versatilis/` folder
     file_path = sys.argv[1] if len(sys.argv) > 1 else None
 
     MiniAgents(llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs"))).run(
