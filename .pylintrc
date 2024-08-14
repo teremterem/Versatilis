@@ -46,14 +46,13 @@ fail-under=10
 #from-stdin=
 
 # Files or directories to be skipped. They should be base names, not paths.
-ignore=CVS,
-       manage.py
+ignore=CVS
 
 # Add files or directories matching the regular expressions patterns to the
 # ignore-list. The regex matches against paths and can be in Posix or Windows
 # format. Because '\\' represents the directory delimiter on Windows systems,
 # it can't be used as an escape character.
-ignore-paths=[^/]+/migrations
+ignore-paths=
 
 # Files or directories matching the regular expression patterns are skipped.
 # The regex matches against base names, not paths. The default value ignores
@@ -89,7 +88,7 @@ persistent=yes
 
 # Minimum Python version to use for version dependent checks. Will default to
 # the version used to run pylint.
-py-version=3.12
+py-version=3.9
 
 # Discover python modules and packages in the file system subtree.
 recursive=no
@@ -432,7 +431,10 @@ disable=raw-checker-failed,
         use-symbolic-message-instead,
         use-implicit-booleaness-not-comparison-to-string,
         use-implicit-booleaness-not-comparison-to-zero,
-        fixme
+        fixme,
+        too-many-arguments,
+        too-many-instance-attributes,
+        too-few-public-methods
 
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
@@ -469,11 +471,6 @@ max-nested-blocks=5
 # it will be considered as an explicit return statement and no message will be
 # printed.
 never-returning-functions=sys.exit,argparse.parse_error
-
-# Let 'consider-using-join' be raised when the separator to join on would be
-# non-empty (resulting in expected fixes of the type: ``"- " + " -
-# ".join(items)``)
-suggest-join-with-non-empty-separator=yes
 
 
 [REPORTS]
@@ -565,7 +562,7 @@ contextmanager-decorators=contextlib.contextmanager
 # List of members which are set dynamically and missed by pylint inference
 # system, and so shouldn't trigger E1101 when accessed. Python regular
 # expressions are accepted.
-generated-members=objects
+generated-members=
 
 # Tells whether to warn about missing members when the owner of the attribute
 # is inferred to be None.
@@ -588,7 +585,7 @@ ignored-checks-for-mixins=no-member,
 # List of class names for which member attributes should not be checked (useful
 # for classes with dynamically set attributes). This supports the use of
 # qualified names.
-ignored-classes=optparse.Values,thread._local,_thread._local,argparse.Namespace
+ignored-classes=optparse.Values,thread._local,_thread._local,argparse.Namespace,pydantic.fields.FieldInfo
 
 # Show a hint with possible names when a member name was not found. The aspect
 # of finding the hint is based on edit distance.
