@@ -45,29 +45,21 @@ ALT_MODEL_AGENTS = {model: MODEL_AGENTS[model] for model in MODEL_AGENTS if mode
 
 
 @miniagent
-async def versatilis(ctx: InteractionContext, file_path_prefix: str) -> None:
+async def versatilis(ctx: InteractionContext) -> None:
     """
     This agent employs many models to answer to the user. The answers of the "favourite" model are considered part of
     the "official" chat history, while the answers of the other models are just written to separate markdown files.
     """
     ctx.reply(FAVOURITE_MODEL_AGENT.inquire(ctx.message_promises))
 
-    for idx, (model, model_agent) in enumerate(ALT_MODEL_AGENTS.items()):
+    for idx, model_agent in enumerate(ALT_MODEL_AGENTS.values()):
         console_style = "36;1" if idx % 2 == 0 else None
+
         ctx.reply(
-            MarkdownHistoryAgent.inquire(
-                model_agent.inquire(
-                    ctx.message_promises,
-                    response_metadata={
-                        # the "no_history" flag is for the global history agent that writes to CHAT.md
-                        "no_history": True,
-                        # the "console_style" flag is for the `console_output_agent`
-                        "console_style": console_style,
-                    },
-                ),
-                history_md_file=str(f"{file_path_prefix}ALT__{model}.md"),
-                ignore_no_history=True,  # the local history agent should still write the ignored messages to the file
-            )
+            model_agent.inquire(
+                ctx.message_promises,
+                response_metadata={"console_style": console_style},  # for the `console_output_agent`
+            ),
         )
 
 
@@ -91,7 +83,7 @@ async def amain(file_path: Optional[str] = None) -> None:
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(history_md_file=f"{file_path_prefix}CHAT.md")
         ),
-        assistant_agent=versatilis.fork(file_path_prefix=file_path_prefix),
+        assistant_agent=versatilis,
     )
 
 
