@@ -79,7 +79,7 @@ async def versatilis(ctx: InteractionContext) -> None:
 
     append_model_tag = False
     for incoming_message in incoming_messages:
-        if incoming_message.is_wrapped_with_model_tag:
+        if getattr(incoming_message, "is_wrapped_with_model_tag", False):
             # the model will see some of the previous dialog turns wrapped with <model></model> se we need
             # to make sure it will not start the new response with another <model>
             append_model_tag = True
