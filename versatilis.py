@@ -33,7 +33,6 @@ MODEL_AGENT_FACTORIES = {
 MODEL_AGENTS = {
     model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
     for model in [
-        # let's use only two best models in our self_dev agents
         GPT_4O,
         CLAUDE_3_5_SONNET,
     ]
