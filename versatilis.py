@@ -75,31 +75,31 @@ async def versatilis(ctx: InteractionContext) -> None:
     This agent employs many models to answer to the user. The answers of the "favourite" model are considered part of
     the "official" chat history, while the answers of the other models are just written to separate markdown files.
     """
+    prompt_messages = list(await ctx.message_promises)
 
-    async def run_model(model: str, model_agent: MiniAgent, **kwargs) -> None:
-        prompt_messages = list(await ctx.message_promises)
+    append_model_tag = False
+    for prompt_message in prompt_messages:
+        if prompt_message.is_wrapped_with_model_tag:
+            # the model will see some of the previous dialog turns wrapped with <model></model> se we need
+            # to make sure it will not start the new response with another <model>
+            append_model_tag = True
+            break
 
-        append_model_tag = False
-        for prompt_message in prompt_messages:
-            if prompt_message.is_wrapped_with_model_tag:
-                # the model will see some of the previous dialog turns wrapped with <model></model> se we need
-                # to make sure it will not start the new response with another <model>
-                append_model_tag = True
-                break
-
+    def run_model(model: str, model_agent: MiniAgent, **kwargs) -> None:
         if append_model_tag:
             # let's make our model think that it already generated the <model> tag
             # (so it doesn't actually generate it)
+            # TODO Oleksandr: make it possible to read the model name directly from the MiniAgent
             prompt_messages.append(AssistantMessage(f"<model {model}>"))
 
         ctx.reply(model_agent.inquire(prompt_messages, system="NEVER START YOUR RESPONSE WITH <model>", **kwargs))
 
-    await run_model(FAVOURITE_MODEL, FAVOURITE_MODEL_AGENT)
+    run_model(FAVOURITE_MODEL, FAVOURITE_MODEL_AGENT)
 
     for idx, (model, model_agent) in enumerate(ALT_MODEL_AGENTS.items()):
         console_style = "36;1" if idx % 2 == 0 else None
 
-        await run_model(model, model_agent, response_metadata={"console_style": console_style})
+        run_model(model, model_agent, response_metadata={"console_style": console_style})
 
 
 async def amain(file_path: Optional[str] = None) -> None:
