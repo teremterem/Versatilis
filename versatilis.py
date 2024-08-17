@@ -109,7 +109,7 @@ async def amain(file_path: Optional[str] = None) -> None:
     """
     if file_path:
         file_path = Path(file_path)
-        prompt = f"<file path={file_path!r}>{file_path.read_text(encoding='utf-8')}</file>"
+        prompt = f"<file path={str(file_path)!r}>{file_path.read_text(encoding='utf-8')}</file>"
         print()
         print(prompt)
         file_path_prefix = f"{file_path}."
