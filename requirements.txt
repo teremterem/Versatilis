@@ -53,7 +53,7 @@ markdown-it-py==3.0.0
     # via miniagents
 mdurl==0.1.2
     # via markdown-it-py
-miniagents==0.0.23
+#miniagents==0.0.23
     # via -r requirements.in
 openai==1.40.6
     # via -r requirements.in
