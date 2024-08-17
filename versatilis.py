@@ -23,19 +23,15 @@ FAVOURITE_MODEL = CLAUDE_3_5_SONNET
 MAX_OUTPUT_TOKENS = 4096
 
 MODEL_AGENT_FACTORIES = {
-    GPT_4O: OpenAIAgent.fork(temperature=0, stop=["</model>"]),
-    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(temperature=0, stop=["</model>"]),
-    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(temperature=0, stop=["</model>"]),
-    CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, temperature=0, stop_sequences=["</model>"]),
-    "claude-3-opus-20240229": AnthropicAgent.fork(
-        max_tokens=MAX_OUTPUT_TOKENS, temperature=0, stop_sequences=["</model>"]
-    ),
-    "claude-3-haiku-20240307": AnthropicAgent.fork(
-        max_tokens=MAX_OUTPUT_TOKENS, temperature=0, stop_sequences=["</model>"]
-    ),
+    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
+    CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
+    "claude-3-opus-20240229": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
+    "claude-3-haiku-20240307": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
 }
 MODEL_AGENTS = {
-    model: MODEL_AGENT_FACTORIES[model].fork(model=model)
+    model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
     for model in [
         # let's use only two best models in our self_dev agents
         GPT_4O,
