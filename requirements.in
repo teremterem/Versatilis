@@ -1,4 +1,8 @@
-anthropic==0.33.1
-miniagents==0.0.23
-openai==1.40.6
-python-dotenv==1.0.1
+anthropic
+click
+miniagents
+openai
+#pdfminer
+pypdf
+python-dotenv
+#unstructured

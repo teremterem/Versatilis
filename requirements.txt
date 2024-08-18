@@ -6,7 +6,7 @@
 #
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.33.1
+anthropic==0.34.0
     # via -r requirements.in
 anyio==4.4.0
     # via
@@ -20,6 +20,8 @@ certifi==2024.7.4
     #   requests
 charset-normalizer==3.3.2
     # via requests
+click==8.1.7
+    # via -r requirements.in
 distro==1.9.0
     # via
     #   anthropic
@@ -55,7 +57,7 @@ mdurl==0.1.2
     # via markdown-it-py
 #miniagents==0.0.23
     # via -r requirements.in
-openai==1.40.6
+openai==1.41.0
     # via -r requirements.in
 packaging==24.1
     # via huggingface-hub
@@ -68,6 +70,8 @@ pydantic==2.8.2
     #   openai
 pydantic-core==2.20.1
     # via pydantic
+pypdf==4.3.1
+    # via -r requirements.in
 python-dotenv==1.0.1
     # via -r requirements.in
 pyyaml==6.0.2
@@ -94,6 +98,7 @@ typing-extensions==4.12.2
     #   openai
     #   pydantic
     #   pydantic-core
+    #   pypdf
 urllib3==2.2.2
     # via requests
 wcwidth==0.2.13

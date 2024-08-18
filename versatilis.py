@@ -1,45 +1,45 @@
 """
-A conversation example between the user and multiple LLMs using the MiniAgents framework.
+Versatilis is a tool for multi-turn conversations with multiple Large Language Models simultaneously.
+Optionally, multiple files can be provided as context for the conversation.
 """
 
-import sys
+import hashlib
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence, Union
 
+import click
 from dotenv import load_dotenv
-from miniagents import InteractionContext, Message, MiniAgent, MiniAgents, miniagent
+from miniagents import InteractionContext, Message, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
 from miniagents.ext.llms import AnthropicAgent, AssistantMessage, OpenAIAgent
+from pypdf import PdfReader
 
 load_dotenv()
 
-VERSATILIS_FOLDER = Path(".versatilis")
+VERSATILIS_FOLDER = Path.home() / ".versatilis"
 
-GPT_4O = "gpt-4o-2024-08-06"
 CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
+GPT_4O = "gpt-4o-2024-08-06"
 
 FAVOURITE_MODEL = CLAUDE_3_5_SONNET
 
 MAX_OUTPUT_TOKENS = 4096
 
 MODEL_AGENT_FACTORIES = {
-    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
     CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
     "claude-3-opus-20240229": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
     "claude-3-haiku-20240307": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
+    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
 }
 MODEL_AGENTS = {
     model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
     for model in [
-        # let's use only two best models in our self_dev agents
-        GPT_4O,
         CLAUDE_3_5_SONNET,
+        GPT_4O,
     ]
 }
-FAVOURITE_MODEL_AGENT = MODEL_AGENTS[FAVOURITE_MODEL]
-ALT_MODEL_AGENTS = {model: MODEL_AGENTS[model] for model in MODEL_AGENTS if model != FAVOURITE_MODEL}
 
 
 class ModelAwareMessage(Message):
@@ -61,7 +61,7 @@ class ModelAwareMessage(Message):
         """
         Whether the message is (or should be) wrapped with a model tag.
         """
-        return self.model and self.content and self.content.strip()
+        return bool(self.model and self.content and self.content.strip())
 
     def _as_string(self) -> str:
         if self.is_wrapped_with_model_tag:
@@ -72,56 +72,90 @@ class ModelAwareMessage(Message):
 @miniagent
 async def versatilis(ctx: InteractionContext) -> None:
     """
-    This agent employs many models to answer to the user. The answers of the "favourite" model are considered part of
-    the "official" chat history, while the answers of the other models are just written to separate markdown files.
+    The main agent that handles the conversation using multiple Large Language Models.
     """
-    prompt_messages = list(await ctx.message_promises)
+    incoming_messages = await ctx.message_promises
 
     append_model_tag = False
-    for prompt_message in prompt_messages:
-        if prompt_message.is_wrapped_with_model_tag:
+    for incoming_message in incoming_messages:
+        if getattr(incoming_message, "is_wrapped_with_model_tag", False):
             # the model will see some of the previous dialog turns wrapped with <model></model> se we need
             # to make sure it will not start the new response with another <model>
             append_model_tag = True
             break
 
-    def run_model(model: str, model_agent: MiniAgent, **kwargs) -> None:
+    for idx, (model, model_agent) in enumerate(MODEL_AGENTS.items()):
+        console_style = "36;1" if idx % 2 == 1 else None
+
+        prompt_messages = incoming_messages
         if append_model_tag:
             # let's make our model think that it already generated the <model> tag
             # (so it doesn't actually generate it)
             # TODO Oleksandr: make it possible to read the model name directly from the MiniAgent
-            prompt_messages.append(AssistantMessage(f"<model {model}>"))
+            prompt_messages = (*prompt_messages, AssistantMessage(f"<model {model}>"))
 
-        ctx.reply(model_agent.inquire(prompt_messages, system="NEVER START YOUR RESPONSE WITH <model>", **kwargs))
+        ctx.reply(
+            model_agent.inquire(
+                prompt_messages,
+                system="NEVER START YOUR RESPONSE WITH <model>",
+                response_metadata={"console_style": console_style},
+            )
+        )
 
-    run_model(FAVOURITE_MODEL, FAVOURITE_MODEL_AGENT)
 
-    for idx, (model, model_agent) in enumerate(ALT_MODEL_AGENTS.items()):
-        console_style = "36;1" if idx % 2 == 0 else None
+def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
+    """
+    Converts a file into a string that can be used in the prompt.
+    """
+    file_path = Path(file_path)
 
-        run_model(model, model_agent, response_metadata={"console_style": console_style})
+    if file_path.suffix.lower() == ".pdf":
+        reader = PdfReader(file_path)
+        file_content = "\n\n".join(page.extract_text() for page in reader.pages)
+    else:
+        file_content = file_path.read_text(encoding="utf-8")
+
+    file_for_prompt = f"<file path={str(file_path)!r}>{file_content}</file>"
+    return file_for_prompt
 
 
-async def amain(file_path: Optional[str] = None) -> None:
+async def conversation_loop(
+    file_paths: Sequence[Union[str, Path]], chat_md: Optional[Union[str, Path]] = None
+) -> None:
     """
     The main conversation loop.
     """
-    if file_path:
-        file_path = Path(file_path)
-        prompt = file_path.read_text(encoding="utf-8")
-        print()
-        print(prompt)
-        file_path_prefix = f"{file_path}."
+    absolute_file_paths = "\n".join(sorted(str(Path(file_path).absolute()) for file_path in file_paths))
+
+    if chat_md:
+        chat_md_path = Path(chat_md)
     else:
-        prompt = None
-        file_path_prefix = ""
+        if len(file_paths) == 1:
+            chat_md_prefix = f"{file_paths[0]}."
+        elif len(file_paths) > 1:
+            chat_md_prefix = (
+                f"MULTI_FILES_{hashlib.sha256(absolute_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}"
+            )
+        else:
+            chat_md_prefix = ""
+        chat_md_path = Path(f"{chat_md_prefix}CHAT.md")
+
+    if file_paths and (not chat_md_path.exists() or chat_md_path.stat().st_size == 0):
+        chat_md_path.write_text(
+            f"\ncontext\n========================================\n```\n{absolute_file_paths}\n```\n", encoding="utf-8"
+        )
+
+    files_in_prompt = [adapt_file_for_prompt(file_path) for file_path in file_paths]
+    for file_in_prompt in files_in_prompt:
+        print()
+        print(file_in_prompt)
 
     dialog_loop.kick_off(
-        prompt,
+        files_in_prompt,
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(
-                history_md_file=f"{file_path_prefix}CHAT.md",
+                history_md_file=str(chat_md_path),
                 # The value of `history_message_factory` is "unfreezable", hence we need to pass it via `mutable_state`
                 mutable_state={"history_message_factory": ModelAwareMessage},
             )
@@ -130,19 +164,33 @@ async def amain(file_path: Optional[str] = None) -> None:
     )
 
 
-def main() -> None:
+@click.command(
+    help=(
+        "Have a multi-turn conversation with multiple Large Language Models simultaneously. "
+        "Optionally, provide a list of file paths (FILE_PATHS) to include as context of the conversation "
+        "(for LLMs the contents of those files will appear at the top, before all the conversation turns)."
+    ),
+)
+@click.argument(
+    "file_paths",
+    nargs=-1,
+    type=click.Path(exists=True),
+)
+@click.option(
+    "-c",
+    "--chat-md",
+    type=click.Path(),
+    help="Path to the chat history markdown file (if not provided, default file name will be used).",
+)
+def main(file_paths: Sequence[str], chat_md: Optional[str] = None) -> None:
     """
-    The main conversation loop.
+    Run the conversation loop between the user and multiple models.
     """
-    # TODO Oleksandr: create `.versatilis/` folder in user's home directory if it doesn't exist
-    # TODO Oleksandr: support a CLI argument that initializes a local `.versatilis/` folder
-    file_path = sys.argv[1] if len(sys.argv) > 1 else None
-
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
-        log_reduced_tracebacks=False,
-    ).run(amain(file_path=file_path))
+        # log_reduced_tracebacks=False,
+    ).run(conversation_loop(file_paths, chat_md))
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter

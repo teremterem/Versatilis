@@ -53,6 +53,7 @@ charset-normalizer==3.3.2
     #   requests
 click==8.1.7
     # via
+    #   -c requirements.txt
     #   black
     #   pip-tools
 comm==0.2.2
@@ -333,7 +334,7 @@ tomli==2.0.1
     #   jupyterlab
     #   pip-tools
     #   pylint
-tomlkit==0.13.1
+tomlkit==0.13.2
     # via pylint
 tornado==6.4.1
     # via
