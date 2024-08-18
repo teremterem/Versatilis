@@ -140,7 +140,7 @@ async def conversation_loop(
             chat_md_prefix = ""
         chat_md_path = Path(f"{chat_md_prefix}CHAT.md")
 
-    if file_paths and not chat_md_path.exists():
+    if file_paths and (not chat_md_path.exists() or chat_md_path.stat().st_size == 0):
         chat_md_path.write_text(
             f"\ncontext\n========================================\n```\n{absolute_file_paths}\n```\n", encoding="utf-8"
         )
@@ -179,7 +179,7 @@ async def conversation_loop(
 @click.option(
     "-c",
     "--chat-md",
-    type=click.Path(exists=True),
+    type=click.Path(),
     help="Path to the chat history markdown file (if not provided, default file name will be used).",
 )
 def main(file_paths: Sequence[str], chat_md: Optional[str] = None) -> None:
