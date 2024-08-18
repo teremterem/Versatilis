@@ -4,7 +4,7 @@ A conversation example between the user and multiple LLMs using the MiniAgents f
 
 import hashlib
 from pathlib import Path
-from typing import Iterable, Optional, Union
+from typing import Optional, Sequence, Union
 
 import click
 from dotenv import load_dotenv
@@ -62,7 +62,7 @@ class ModelAwareMessage(Message):
         """
         Whether the message is (or should be) wrapped with a model tag.
         """
-        return self.model and self.content and self.content.strip()
+        return bool(self.model and self.content and self.content.strip())
 
     def _as_string(self) -> str:
         if self.is_wrapped_with_model_tag:
@@ -120,7 +120,7 @@ def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
     return file_for_prompt
 
 
-async def amain(file_paths: Iterable[Union[str, Path]]) -> None:
+async def amain(file_paths: Sequence[Union[str, Path]]) -> None:
     """
     The main conversation loop.
     """
@@ -162,7 +162,7 @@ async def amain(file_paths: Iterable[Union[str, Path]]) -> None:
 
 @click.command()
 @click.argument("file_paths", nargs=-1, type=click.Path(exists=True))
-def main(file_paths: Iterable[str]) -> None:
+def main(file_paths: Sequence[str]) -> None:
     """
     The main conversation loop.
 
