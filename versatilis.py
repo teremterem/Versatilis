@@ -8,7 +8,7 @@ from typing import Optional, Sequence, Union
 
 import click
 from dotenv import load_dotenv
-from miniagents import InteractionContext, Message, MiniAgent, MiniAgents, miniagent
+from miniagents import InteractionContext, Message, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
 from miniagents.ext.llms import AnthropicAgent, AssistantMessage, OpenAIAgent
 from pypdf import PdfReader
@@ -17,30 +17,28 @@ load_dotenv()
 
 VERSATILIS_FOLDER = Path.home() / ".versatilis"
 
-GPT_4O = "gpt-4o-2024-08-06"
 CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
+GPT_4O = "gpt-4o-2024-08-06"
 
 FAVOURITE_MODEL = CLAUDE_3_5_SONNET
 
 MAX_OUTPUT_TOKENS = 4096
 
 MODEL_AGENT_FACTORIES = {
-    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
     CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
     "claude-3-opus-20240229": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
     "claude-3-haiku-20240307": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
+    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
+    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
 }
 MODEL_AGENTS = {
     model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
     for model in [
-        GPT_4O,
         CLAUDE_3_5_SONNET,
+        GPT_4O,
     ]
 }
-FAVOURITE_MODEL_AGENT = MODEL_AGENTS[FAVOURITE_MODEL]
-ALT_MODEL_AGENTS = {model: MODEL_AGENTS[model] for model in MODEL_AGENTS if model != FAVOURITE_MODEL}
 
 
 class ModelAwareMessage(Message):
@@ -86,7 +84,9 @@ async def versatilis(ctx: InteractionContext) -> None:
             append_model_tag = True
             break
 
-    def run_model(model: str, model_agent: MiniAgent, **kwargs) -> None:
+    for idx, (model, model_agent) in enumerate(MODEL_AGENTS.items()):
+        console_style = "36;1" if idx % 2 == 1 else None
+
         prompt_messages = incoming_messages
         if append_model_tag:
             # let's make our model think that it already generated the <model> tag
@@ -94,14 +94,13 @@ async def versatilis(ctx: InteractionContext) -> None:
             # TODO Oleksandr: make it possible to read the model name directly from the MiniAgent
             prompt_messages = (*prompt_messages, AssistantMessage(f"<model {model}>"))
 
-        ctx.reply(model_agent.inquire(prompt_messages, system="NEVER START YOUR RESPONSE WITH <model>", **kwargs))
-
-    run_model(FAVOURITE_MODEL, FAVOURITE_MODEL_AGENT)
-
-    for idx, (model, model_agent) in enumerate(ALT_MODEL_AGENTS.items()):
-        console_style = "36;1" if idx % 2 == 0 else None
-
-        run_model(model, model_agent, response_metadata={"console_style": console_style})
+        ctx.reply(
+            model_agent.inquire(
+                prompt_messages,
+                system="NEVER START YOUR RESPONSE WITH <model>",
+                response_metadata={"console_style": console_style},
+            )
+        )
 
 
 def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
@@ -120,24 +119,27 @@ def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
     return file_for_prompt
 
 
-async def amain(file_paths: Sequence[Union[str, Path]]) -> None:
+async def amain(file_paths: Sequence[Union[str, Path]], chat_md: Optional[Union[str, Path]] = None) -> None:
     """
     The main conversation loop.
     """
     absolute_file_paths = "\n".join(sorted(str(Path(file_path).absolute()) for file_path in file_paths))
 
-    if len(file_paths) == 1:
-        file_path = file_paths[0]
-        file_path_prefix = f"{file_path}."
-    elif len(file_paths) > 1:
-        file_paths_hash = hashlib.sha256(absolute_file_paths.encode(encoding="utf-8")).hexdigest()
-        file_path_prefix = f"MULTI_FILES_{file_paths_hash[:8]}."
+    if chat_md:
+        chat_md_path = Path(chat_md)
     else:
-        file_path_prefix = ""
-    history_md_file_path = Path(f"{file_path_prefix}CHAT.md")
+        if len(file_paths) == 1:
+            chat_md_prefix = f"{file_paths[0]}."
+        elif len(file_paths) > 1:
+            chat_md_prefix = (
+                f"MULTI_FILES_{hashlib.sha256(absolute_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}"
+            )
+        else:
+            chat_md_prefix = ""
+        chat_md_path = Path(f"{chat_md_prefix}CHAT.md")
 
-    if file_paths and not history_md_file_path.exists():
-        history_md_file_path.write_text(
+    if file_paths and not chat_md_path.exists():
+        chat_md_path.write_text(
             f"\ncontext\n========================================\n```\n{absolute_file_paths}\n```\n", encoding="utf-8"
         )
 
@@ -151,7 +153,7 @@ async def amain(file_paths: Sequence[Union[str, Path]]) -> None:
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(
-                history_md_file=str(history_md_file_path),
+                history_md_file=str(chat_md_path),
                 # The value of `history_message_factory` is "unfreezable", hence we need to pass it via `mutable_state`
                 mutable_state={"history_message_factory": ModelAwareMessage},
             )
@@ -161,8 +163,18 @@ async def amain(file_paths: Sequence[Union[str, Path]]) -> None:
 
 
 @click.command()
-@click.argument("file_paths", nargs=-1, type=click.Path(exists=True))
-def main(file_paths: Sequence[str]) -> None:
+@click.argument(
+    "file_paths",
+    nargs=-1,
+    type=click.Path(exists=True),
+    help="One or more file paths to include as context in the prompt.",
+)
+@click.option(
+    "--chat-md",
+    type=click.Path(exists=True),
+    help="Path to the chat markdown file.",
+)
+def main(file_paths: Sequence[str], chat_md: Optional[str] = None) -> None:
     """
     The main conversation loop.
 
@@ -171,7 +183,7 @@ def main(file_paths: Sequence[str]) -> None:
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
         # log_reduced_tracebacks=False,
-    ).run(amain(file_paths))
+    ).run(amain(file_paths, chat_md))
 
 
 if __name__ == "__main__":
