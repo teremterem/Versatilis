@@ -2,6 +2,7 @@
 A conversation example between the user and multiple LLMs using the MiniAgents framework.
 """
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Iterable, Optional, Union
@@ -123,20 +124,34 @@ async def amain(file_paths: Iterable[Union[str, Path]]) -> None:
     """
     The main conversation loop.
     """
+    absolute_file_paths = "\n".join(sorted(str(Path(file_path).absolute()) for file_path in file_paths))
+
+    if len(file_paths) == 1:
+        file_path = file_paths[0]
+        file_path_prefix = f"{file_path}."
+    elif len(file_paths) > 1:
+        file_paths_hash = hashlib.sha256(absolute_file_paths.encode(encoding="utf-8")).hexdigest()
+        file_path_prefix = f"MULTI_FILES_{file_paths_hash[:8]}."
+    else:
+        file_path_prefix = ""
+    history_md_file_path = Path(f"{file_path_prefix}CHAT.md")
+
+    if file_paths and not history_md_file_path.exists():
+        history_md_file_path.write_text(
+            f"\ncontext\n========================================\n```\n{absolute_file_paths}\n```\n", encoding="utf-8"
+        )
+
     files_in_prompt = [adapt_file_for_prompt(file_path) for file_path in file_paths]
     for file_in_prompt in files_in_prompt:
         print()
         print(file_in_prompt)
-
-    # TODO TODO TODO
-    file_path_prefix = ""
 
     dialog_loop.kick_off(
         files_in_prompt,
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(
-                history_md_file=f"{file_path_prefix}CHAT.md",
+                history_md_file=str(history_md_file_path),
                 # The value of `history_message_factory` is "unfreezable", hence we need to pass it via `mutable_state`
                 mutable_state={"history_message_factory": ModelAwareMessage},
             )
