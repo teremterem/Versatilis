@@ -125,7 +125,14 @@ async def conversation_loop(
     """
     The main conversation loop.
     """
-    absolute_file_paths = "\n".join(sorted(str(Path(file_path).absolute()) for file_path in file_paths))
+    if chat_md:
+        base_dir = Path(chat_md).parent
+    elif len(file_paths) == 1:
+        base_dir = Path(file_paths[0]).parent
+    else:
+        base_dir = Path.cwd()
+
+    relative_file_paths = "\n".join(sorted(str(Path(file_path).relative_to(base_dir)) for file_path in file_paths))
 
     if chat_md:
         chat_md_path = Path(chat_md)
@@ -134,15 +141,16 @@ async def conversation_loop(
             chat_md_prefix = f"{file_paths[0]}."
         elif len(file_paths) > 1:
             chat_md_prefix = (
-                f"MULTI_FILES_{hashlib.sha256(absolute_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}"
+                f"MULTI_FILES_{hashlib.sha256(relative_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}"
             )
         else:
             chat_md_prefix = ""
+
         chat_md_path = Path(f"{chat_md_prefix}CHAT.md")
 
-    if file_paths and (not chat_md_path.exists() or chat_md_path.stat().st_size == 0):
+    if relative_file_paths and (not chat_md_path.exists() or chat_md_path.stat().st_size == 0):
         chat_md_path.write_text(
-            f"\ncontext\n========================================\n```\n{absolute_file_paths}\n```\n", encoding="utf-8"
+            f"\ncontext\n========================================\n```\n{relative_file_paths}\n```\n", encoding="utf-8"
         )
 
     files_in_prompt = [adapt_file_for_prompt(file_path) for file_path in file_paths]
