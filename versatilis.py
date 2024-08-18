@@ -4,6 +4,7 @@ Optionally, multiple files can be provided as context for the conversation.
 """
 
 import hashlib
+import os
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -84,15 +85,14 @@ async def versatilis(ctx: InteractionContext) -> None:
             append_model_tag = True
             break
 
-    for idx, (model, model_agent) in enumerate(MODEL_AGENTS.items()):
+    for idx, model_agent in enumerate(MODEL_AGENTS.values()):
         console_style = "36;1" if idx % 2 == 1 else None
 
         prompt_messages = incoming_messages
         if append_model_tag:
             # let's make our model think that it already generated the <model> tag
             # (so it doesn't actually generate it)
-            # TODO Oleksandr: make it possible to read the model name directly from the MiniAgent
-            prompt_messages = (*prompt_messages, AssistantMessage(f"<model {model}>"))
+            prompt_messages = (*prompt_messages, AssistantMessage("<model>"))
 
         ctx.reply(
             model_agent.inquire(
@@ -132,7 +132,7 @@ async def conversation_loop(
     else:
         base_dir = Path.cwd()
 
-    relative_file_paths = "\n".join(sorted(str(Path(file_path).relative_to(base_dir)) for file_path in file_paths))
+    relative_file_paths = "\n".join(sorted(os.path.relpath(file_path, base_dir) for file_path in file_paths))
 
     if chat_md:
         chat_md_path = Path(chat_md)
@@ -141,25 +141,31 @@ async def conversation_loop(
             chat_md_prefix = f"{file_paths[0]}."
         elif len(file_paths) > 1:
             chat_md_prefix = (
-                f"MULTI_FILES_{hashlib.sha256(relative_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}"
+                f"MULTI_FILES_{hashlib.sha256(relative_file_paths.encode(encoding='utf-8')).hexdigest()[:8]}."
             )
         else:
             chat_md_prefix = ""
 
         chat_md_path = Path(f"{chat_md_prefix}CHAT.md")
 
-    if relative_file_paths and (not chat_md_path.exists() or chat_md_path.stat().st_size == 0):
+    if relative_file_paths:
+        print()
+        print("CONTEXT:")
+        print(relative_file_paths)
+
+    if chat_md_path.exists() and chat_md_path.stat().st_size > 0:
+        print()
+        print(f"ATTENTION! PREVIOUS CHAT HISTORY EXISTS IN `{chat_md_path}`")
+
+    elif relative_file_paths:
+        chat_md_path.parent.mkdir(parents=True, exist_ok=True)
         chat_md_path.write_text(
-            f"\ncontext\n========================================\n```\n{relative_file_paths}\n```\n", encoding="utf-8"
+            f"\ncontext\n========================================\n```\n{relative_file_paths}\n```\n",
+            encoding="utf-8",
         )
 
-    files_in_prompt = [adapt_file_for_prompt(file_path) for file_path in file_paths]
-    for file_in_prompt in files_in_prompt:
-        print()
-        print(file_in_prompt)
-
     dialog_loop.kick_off(
-        files_in_prompt,
+        [adapt_file_for_prompt(file_path) for file_path in file_paths],
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(
