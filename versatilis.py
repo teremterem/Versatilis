@@ -3,10 +3,10 @@ A conversation example between the user and multiple LLMs using the MiniAgents f
 """
 
 import hashlib
-import sys
 from pathlib import Path
 from typing import Iterable, Optional, Union
 
+import click
 from dotenv import load_dotenv
 from miniagents import InteractionContext, Message, MiniAgent, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
@@ -160,12 +160,14 @@ async def amain(file_paths: Iterable[Union[str, Path]]) -> None:
     )
 
 
-def main() -> None:
+@click.command()
+@click.argument("file_paths", nargs=-1, type=click.Path(exists=True))
+def main(file_paths: Iterable[str]) -> None:
     """
     The main conversation loop.
-    """
-    file_paths = sys.argv[1:]
 
+    FILE_PATHS: One or more file paths to process.
+    """
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
         # log_reduced_tracebacks=False,
@@ -173,4 +175,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main()  # pylint: disable=no-value-for-parameter
