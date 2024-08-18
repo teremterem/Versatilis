@@ -1,5 +1,6 @@
 """
-A conversation example between the user and multiple LLMs using the MiniAgents framework.
+Versatilis is a tool for multi-turn conversations with multiple Large Language Models simultaneously.
+Optionally, multiple files can be provided as context for the conversation.
 """
 
 import hashlib
@@ -71,8 +72,7 @@ class ModelAwareMessage(Message):
 @miniagent
 async def versatilis(ctx: InteractionContext) -> None:
     """
-    This agent employs many models to answer to the user. The answers of the "favourite" model are considered part of
-    the "official" chat history, while the answers of the other models are just written to separate markdown files.
+    The main agent that handles the conversation using multiple Large Language Models.
     """
     incoming_messages = await ctx.message_promises
 
@@ -105,7 +105,7 @@ async def versatilis(ctx: InteractionContext) -> None:
 
 def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
     """
-    Converts a file into a string that can be used as a prompt for a model.
+    Converts a file into a string that can be used in the prompt.
     """
     file_path = Path(file_path)
 
@@ -119,7 +119,9 @@ def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
     return file_for_prompt
 
 
-async def amain(file_paths: Sequence[Union[str, Path]], chat_md: Optional[Union[str, Path]] = None) -> None:
+async def conversation_loop(
+    file_paths: Sequence[Union[str, Path]], chat_md: Optional[Union[str, Path]] = None
+) -> None:
     """
     The main conversation loop.
     """
@@ -162,28 +164,32 @@ async def amain(file_paths: Sequence[Union[str, Path]], chat_md: Optional[Union[
     )
 
 
-@click.command()
+@click.command(
+    help=(
+        "Have a multi-turn conversation with multiple Large Language Models simultaneously. "
+        "Optionally, provide a list of file paths (FILE_PATHS) to include as context of the conversation "
+        "(for LLMs the contents of those files will appear at the top, before all the conversation turns)."
+    ),
+)
 @click.argument(
     "file_paths",
     nargs=-1,
     type=click.Path(exists=True),
-    help="One or more file paths to include as context in the prompt.",
 )
 @click.option(
+    "-c",
     "--chat-md",
     type=click.Path(exists=True),
-    help="Path to the chat markdown file.",
+    help="Path to the chat history markdown file (if not provided, default file name will be used).",
 )
 def main(file_paths: Sequence[str], chat_md: Optional[str] = None) -> None:
     """
-    The main conversation loop.
-
-    FILE_PATHS: One or more file paths to process.
+    Run the conversation loop between the user and multiple models.
     """
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
         # log_reduced_tracebacks=False,
-    ).run(amain(file_paths, chat_md))
+    ).run(conversation_loop(file_paths, chat_md))
 
 
 if __name__ == "__main__":
