@@ -6,28 +6,49 @@
 #
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.33.1
+anthropic==0.34.0
     # via -r requirements.in
 anyio==4.4.0
     # via
     #   anthropic
     #   httpx
     #   openai
+backoff==2.2.1
+    # via unstructured
+beautifulsoup4==4.12.3
+    # via unstructured
 certifi==2024.7.4
     # via
     #   httpcore
     #   httpx
     #   requests
+    #   unstructured-client
+chardet==5.2.0
+    # via unstructured
 charset-normalizer==3.3.2
-    # via requests
+    # via
+    #   requests
+    #   unstructured-client
+click==8.1.7
+    # via nltk
+dataclasses-json==0.6.7
+    # via
+    #   unstructured
+    #   unstructured-client
+deepdiff==7.0.1
+    # via unstructured-client
 distro==1.9.0
     # via
     #   anthropic
     #   openai
+emoji==2.12.1
+    # via unstructured
 exceptiongroup==1.2.2
     # via anyio
 filelock==3.15.4
     # via huggingface-hub
+filetype==1.2.0
+    # via unstructured
 fsspec==2024.6.1
     # via huggingface-hub
 h11==0.14.0
@@ -38,6 +59,7 @@ httpx==0.27.0
     # via
     #   anthropic
     #   openai
+    #   unstructured-client
 huggingface-hub==0.24.5
     # via tokenizers
 idna==3.7
@@ -45,22 +67,52 @@ idna==3.7
     #   anyio
     #   httpx
     #   requests
+    #   unstructured-client
 jiter==0.5.0
     # via
     #   anthropic
     #   openai
+joblib==1.4.2
+    # via nltk
+jsonpath-python==1.0.6
+    # via unstructured-client
+langdetect==1.0.9
+    # via unstructured
+lxml==5.3.0
+    # via unstructured
 markdown-it-py==3.0.0
     # via miniagents
+marshmallow==3.21.3
+    # via
+    #   dataclasses-json
+    #   unstructured-client
 mdurl==0.1.2
     # via markdown-it-py
-#miniagents==0.0.23
+miniagents==0.0.23
     # via -r requirements.in
-openai==1.40.6
+mypy-extensions==1.0.0
+    # via
+    #   typing-inspect
+    #   unstructured-client
+nest-asyncio==1.6.0
+    # via unstructured-client
+nltk==3.9
+    # via unstructured
+numpy==1.26.4
+    # via unstructured
+openai==1.41.0
     # via -r requirements.in
+ordered-set==4.1.0
+    # via deepdiff
 packaging==24.1
-    # via huggingface-hub
+    # via
+    #   huggingface-hub
+    #   marshmallow
+    #   unstructured-client
 prompt-toolkit==3.0.47
     # via miniagents
+psutil==6.0.0
+    # via unstructured
 pydantic==2.8.2
     # via
     #   anthropic
@@ -68,33 +120,81 @@ pydantic==2.8.2
     #   openai
 pydantic-core==2.20.1
     # via pydantic
+pypdf==4.3.1
+    # via
+    #   -r requirements.in
+    #   unstructured-client
+python-dateutil==2.9.0.post0
+    # via unstructured-client
 python-dotenv==1.0.1
     # via -r requirements.in
+python-iso639==2024.4.27
+    # via unstructured
+python-magic==0.4.27
+    # via unstructured
 pyyaml==6.0.2
     # via huggingface-hub
+rapidfuzz==3.9.6
+    # via unstructured
+regex==2024.7.24
+    # via nltk
 requests==2.32.3
-    # via huggingface-hub
+    # via
+    #   huggingface-hub
+    #   requests-toolbelt
+    #   unstructured
+    #   unstructured-client
+requests-toolbelt==1.0.0
+    # via unstructured-client
+six==1.16.0
+    # via
+    #   langdetect
+    #   python-dateutil
+    #   unstructured-client
 sniffio==1.3.1
     # via
     #   anthropic
     #   anyio
     #   httpx
     #   openai
+soupsieve==2.6
+    # via beautifulsoup4
+tabulate==0.9.0
+    # via unstructured
 tokenizers==0.20.0
     # via anthropic
 tqdm==4.66.5
     # via
     #   huggingface-hub
+    #   nltk
     #   openai
+    #   unstructured
 typing-extensions==4.12.2
     # via
     #   anthropic
     #   anyio
+    #   emoji
     #   huggingface-hub
     #   openai
     #   pydantic
     #   pydantic-core
+    #   pypdf
+    #   typing-inspect
+    #   unstructured
+    #   unstructured-client
+typing-inspect==0.9.0
+    # via
+    #   dataclasses-json
+    #   unstructured-client
+unstructured==0.15.5
+    # via -r requirements.in
+unstructured-client==0.25.5
+    # via unstructured
 urllib3==2.2.2
-    # via requests
+    # via
+    #   requests
+    #   unstructured-client
 wcwidth==0.2.13
     # via prompt-toolkit
+wrapt==1.16.0
+    # via unstructured
