@@ -4,12 +4,13 @@ A conversation example between the user and multiple LLMs using the MiniAgents f
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from dotenv import load_dotenv
 from miniagents import InteractionContext, Message, MiniAgent, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
 from miniagents.ext.llms import AnthropicAgent, AssistantMessage, OpenAIAgent
+from pypdf import PdfReader
 
 load_dotenv()
 
@@ -102,16 +103,31 @@ async def versatilis(ctx: InteractionContext) -> None:
         run_model(model, model_agent, response_metadata={"console_style": console_style})
 
 
+def adapt_file_to_prompt(file_path: Union[Path, str]) -> str:
+    """
+    Convert a file to a prompt.
+    """
+    file_path = Path(file_path)
+
+    if file_path.suffix.lower() == ".pdf":
+        reader = PdfReader(file_path)
+        file_content = "\n\n".join(page.extract_text() for page in reader.pages)
+    else:
+        file_content = file_path.read_text(encoding="utf-8")
+
+    prompt = f"<file path={str(file_path)!r}>{file_content}</file>"
+    return prompt
+
+
 async def amain(file_path: Optional[str] = None) -> None:
     """
     The main conversation loop.
     """
     if file_path:
-        file_path = Path(file_path)
-        prompt = f"<file path={str(file_path)!r}>{file_path.read_text(encoding='utf-8')}</file>"
+        prompt = adapt_file_to_prompt(file_path)
+        file_path_prefix = f"{file_path}."
         print()
         print(prompt)
-        file_path_prefix = f"{file_path}."
     else:
         prompt = None
         file_path_prefix = ""
@@ -138,7 +154,7 @@ def main() -> None:
 
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
-        log_reduced_tracebacks=False,
+        # log_reduced_tracebacks=False,
     ).run(amain(file_path=file_path))
 
 

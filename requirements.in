@@ -1,6 +1,7 @@
 anthropic
 miniagents
 openai
+#pdfminer
 pypdf
 python-dotenv
-unstructured
+#unstructured
