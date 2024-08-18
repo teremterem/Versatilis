@@ -4,7 +4,7 @@ A conversation example between the user and multiple LLMs using the MiniAgents f
 
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Iterable, Optional, Union
 
 from dotenv import load_dotenv
 from miniagents import InteractionContext, Message, MiniAgent, MiniAgents, miniagent
@@ -103,9 +103,9 @@ async def versatilis(ctx: InteractionContext) -> None:
         run_model(model, model_agent, response_metadata={"console_style": console_style})
 
 
-def adapt_file_to_prompt(file_path: Union[Path, str]) -> str:
+def adapt_file_for_prompt(file_path: Union[str, Path]) -> str:
     """
-    Convert a file to a prompt.
+    Converts a file into a string that can be used as a prompt for a model.
     """
     file_path = Path(file_path)
 
@@ -115,25 +115,24 @@ def adapt_file_to_prompt(file_path: Union[Path, str]) -> str:
     else:
         file_content = file_path.read_text(encoding="utf-8")
 
-    prompt = f"<file path={str(file_path)!r}>{file_content}</file>"
-    return prompt
+    file_for_prompt = f"<file path={str(file_path)!r}>{file_content}</file>"
+    return file_for_prompt
 
 
-async def amain(file_path: Optional[str] = None) -> None:
+async def amain(file_paths: Iterable[Union[str, Path]]) -> None:
     """
     The main conversation loop.
     """
-    if file_path:
-        prompt = adapt_file_to_prompt(file_path)
-        file_path_prefix = f"{file_path}."
+    files_in_prompt = [adapt_file_for_prompt(file_path) for file_path in file_paths]
+    for file_in_prompt in files_in_prompt:
         print()
-        print(prompt)
-    else:
-        prompt = None
-        file_path_prefix = ""
+        print(file_in_prompt)
+
+    # TODO TODO TODO
+    file_path_prefix = ""
 
     dialog_loop.kick_off(
-        prompt,
+        files_in_prompt,
         user_agent=console_user_agent.fork(
             # write chat history to a markdown file
             history_agent=MarkdownHistoryAgent.fork(
@@ -150,12 +149,12 @@ def main() -> None:
     """
     The main conversation loop.
     """
-    file_path = sys.argv[1] if len(sys.argv) > 1 else None
+    file_paths = sys.argv[1:]
 
     MiniAgents(
         llm_logger_agent=markdown_llm_logger_agent.fork(log_folder=str(VERSATILIS_FOLDER / "llm_logs")),
         # log_reduced_tracebacks=False,
-    ).run(amain(file_path=file_path))
+    ).run(amain(file_paths))
 
 
 if __name__ == "__main__":
