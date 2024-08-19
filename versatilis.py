@@ -5,12 +5,13 @@ Optionally, multiple files can be provided as context for the conversation.
 
 import hashlib
 import os
+import traceback
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Any, AsyncIterator, Iterable, Optional, Sequence, Union
 
 import click
 from dotenv import load_dotenv
-from miniagents import InteractionContext, Message, MiniAgents, miniagent
+from miniagents import InteractionContext, Message, MessagePromise, MessageSequencePromise, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
 from miniagents.ext.llms import AnthropicAgent, AssistantMessage, OpenAIAgent
 from pypdf import PdfReader
@@ -69,6 +70,67 @@ class ModelAwareMessage(Message):
 
 
 @miniagent
+async def error_to_message_agent(
+    ctx: InteractionContext, exceptions_to_catch: Iterable[type[BaseException]] = (Exception,)
+) -> None:
+    """
+    An agent that catches exceptions and converts them to messages.
+    """
+    exceptions_to_catch = tuple(exceptions_to_catch)
+
+    # encountered_error = None
+
+    class _StreamReplayIteratorProxy(AsyncIterator[Any]):
+        """
+        TODO Oleksandr: give this class a better name
+        """
+
+        def __init__(self, original, *args, **kwargs) -> None:
+            self._original = original
+            super().__init__(*args, **kwargs)
+
+        async def __anext__(self) -> Any:
+            return await self._original.__anext__()
+
+    class _MessageSequencePromiseProxy(MessageSequencePromise):
+        """
+        TODO Oleksandr: give this class a better name
+        """
+
+        def __init__(self, original, *args, **kwargs) -> None:
+            self._original = original
+            super().__init__(*args, **kwargs)
+
+        def __aiter__(self) -> AsyncIterator[MessagePromise]:
+            """
+            TODO Oleksandr: do I need to proxy every method and attribute ?
+            """
+            return self._original.__aiter__()
+
+    class _MessagePromiseProxy(MessagePromise):
+        """
+        TODO Oleksandr: give this class a better name
+        """
+
+        def __init__(self, original, *args, **kwargs) -> None:
+            self._original = original
+            super().__init__(*args, **kwargs)
+
+        def __aiter__(self) -> AsyncIterator[str]:
+            """
+            TODO Oleksandr: do I need to proxy every method and attribute ?
+            """
+            return self._original.__aiter__()
+
+    async for msg_promise in ctx.message_promises:
+        ctx.reply(msg_promise)
+        try:
+            await msg_promise
+        except exceptions_to_catch:
+            ctx.reply(traceback.format_exc())
+
+
+@miniagent
 async def versatilis(ctx: InteractionContext) -> None:
     """
     The main agent that handles the conversation using multiple Large Language Models.
@@ -93,10 +155,12 @@ async def versatilis(ctx: InteractionContext) -> None:
             prompt_messages = (*prompt_messages, AssistantMessage("<model>"))
 
         ctx.reply(
-            model_agent.inquire(
-                prompt_messages,
-                system="NEVER START YOUR RESPONSE WITH <model>",
-                response_metadata={"console_style": console_style},
+            error_to_message_agent.inquire(
+                model_agent.inquire(
+                    prompt_messages,
+                    system="NEVER START YOUR RESPONSE WITH <model>",
+                    response_metadata={"console_style": console_style},
+                )
             )
         )
 
