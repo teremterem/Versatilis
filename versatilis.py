@@ -22,8 +22,6 @@ VERSATILIS_FOLDER = Path.home() / ".versatilis"
 CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
 GPT_4O = "gpt-4o-2024-08-06"
 
-FAVOURITE_MODEL = CLAUDE_3_5_SONNET
-
 MAX_OUTPUT_TOKENS = 4096
 
 MODEL_AGENT_FACTORIES = {
@@ -150,19 +148,21 @@ async def conversation_loop(
 
     if relative_file_paths:
         print()
-        print("CONTEXT:")
-        print(relative_file_paths)
+        print("\033[36;1mCONTEXT:")
+        print(f"{relative_file_paths}\033[0m")
 
+    print()
     if chat_md_path.exists() and chat_md_path.stat().st_size > 0:
-        print()
-        print(f"ATTENTION! PREVIOUS CHAT HISTORY EXISTS IN `{chat_md_path}`")
+        print(f"\033[34;1mATTENTION! RESUMING EXISTING CONVERSATION: {chat_md_path}\033[0m")
+    else:
+        print(f"\033[97;1mNEW CONVERSATION: {chat_md_path}\033[0m")
 
-    elif relative_file_paths:
-        chat_md_path.parent.mkdir(parents=True, exist_ok=True)
-        chat_md_path.write_text(
-            f"\ncontext\n========================================\n```\n{relative_file_paths}\n```\n",
-            encoding="utf-8",
-        )
+        if relative_file_paths:
+            chat_md_path.parent.mkdir(parents=True, exist_ok=True)
+            chat_md_path.write_text(
+                f"\ncontext\n========================================\n```\n{relative_file_paths}\n```\n",
+                encoding="utf-8",
+            )
 
     dialog_loop.kick_off(
         [adapt_file_for_prompt(file_path) for file_path in file_paths],
