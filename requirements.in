@@ -6,3 +6,4 @@ openai
 pypdf
 python-dotenv
 #unstructured
+xonsh[full]

@@ -70,7 +70,7 @@ class ModelAwareMessage(Message):
 
 
 @miniagent
-async def error_to_message_agent(
+async def error_to_message_agent(  # TODO Oleksandr: get rid of this agent
     ctx: InteractionContext, exceptions_to_catch: Iterable[type[BaseException]] = (Exception,)
 ) -> None:
     """
