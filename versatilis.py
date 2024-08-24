@@ -20,26 +20,19 @@ load_dotenv()
 
 VERSATILIS_FOLDER = Path.home() / ".versatilis"
 
-CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
-GPT_4O = "gpt-4o-2024-08-06"
+TEMPERATURE = 0
+MODEL_CLOSING_TAG = "</model>"
 
-MAX_OUTPUT_TOKENS = 4096
+anthropic_factory = AnthropicAgent.fork(temperature=TEMPERATURE, max_tokens=4096, stop_sequences=[MODEL_CLOSING_TAG])
+openai_factory = OpenAIAgent.fork(temperature=TEMPERATURE, stop=[MODEL_CLOSING_TAG])
 
 MODEL_AGENT_FACTORIES = {
-    CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    "claude-3-opus-20240229": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    "claude-3-haiku-20240307": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
+    "claude-3-5-sonnet-20240620": anthropic_factory,
+    "chatgpt-4o-latest": openai_factory,
+    "gpt-4o-2024-08-06": openai_factory,
+    # "gpt-4o-mini-2024-07-18": openai_factory,
 }
-MODEL_AGENTS = {
-    model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
-    for model in [
-        CLAUDE_3_5_SONNET,
-        GPT_4O,
-    ]
-}
+MODEL_AGENTS = {model: agent_factory.fork(model=model) for model, agent_factory in MODEL_AGENT_FACTORIES.items()}
 
 
 class ModelAwareMessage(Message):
