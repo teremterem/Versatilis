@@ -5,13 +5,12 @@ Optionally, multiple files can be provided as context for the conversation.
 
 import hashlib
 import os
-import traceback
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterable, Optional, Sequence, Union
+from typing import Optional, Sequence, Union
 
 import click
 from dotenv import load_dotenv
-from miniagents import InteractionContext, Message, MessagePromise, MessageSequencePromise, MiniAgents, miniagent
+from miniagents import InteractionContext, Message, MiniAgents, miniagent
 from miniagents.ext import MarkdownHistoryAgent, console_user_agent, dialog_loop, markdown_llm_logger_agent
 from miniagents.ext.llms import AnthropicAgent, AssistantMessage, OpenAIAgent
 from pypdf import PdfReader
@@ -27,9 +26,9 @@ anthropic_factory = AnthropicAgent.fork(temperature=TEMPERATURE, max_tokens=4096
 openai_factory = OpenAIAgent.fork(temperature=TEMPERATURE, stop=[MODEL_CLOSING_TAG])
 
 MODEL_AGENT_FACTORIES = {
-    "claude-3-5-sonnet-20240620": anthropic_factory,
     "chatgpt-4o-latest": openai_factory,
-    "gpt-4o-2024-08-06": openai_factory,
+    "claude-3-5-sonnet-20240620": anthropic_factory,
+    "gpt-4o-2024-05-13": openai_factory,
     # "gpt-4o-mini-2024-07-18": openai_factory,
 }
 MODEL_AGENTS = {model: agent_factory.fork(model=model) for model, agent_factory in MODEL_AGENT_FACTORIES.items()}
@@ -44,7 +43,8 @@ class ModelAwareMessage(Message):
 
         <model {model_name}>{message_content}</model>
 
-    If no model is specified or there is no content, it behaves like a regular Message.
+    If the message is not an assistant message or there is no content, it will be formatted the usual way,
+    using the parent class.
     """
 
     model: Optional[str] = None
@@ -54,73 +54,14 @@ class ModelAwareMessage(Message):
         """
         Whether the message is (or should be) wrapped with a model tag.
         """
-        return bool(self.model and self.content and self.content.strip())
+        return bool(self.role == "assistant" and self.content and self.content.strip())
 
     def _as_string(self) -> str:
         if self.is_wrapped_with_model_tag:
-            return f"<model {self.model}>{self.content}</model>"
+            if self.model:
+                return f"<model {self.model}>{self.content}</model>"
+            return f"<model>{self.content}</model>"
         return super()._as_string()
-
-
-@miniagent
-async def error_to_message_agent(  # TODO Oleksandr: get rid of this agent
-    ctx: InteractionContext, exceptions_to_catch: Iterable[type[BaseException]] = (Exception,)
-) -> None:
-    """
-    An agent that catches exceptions and converts them to messages.
-    """
-    exceptions_to_catch = tuple(exceptions_to_catch)
-
-    # encountered_error = None
-
-    class _StreamReplayIteratorProxy(AsyncIterator[Any]):
-        """
-        TODO Oleksandr: give this class a better name
-        """
-
-        def __init__(self, original, *args, **kwargs) -> None:
-            self._original = original
-            super().__init__(*args, **kwargs)
-
-        async def __anext__(self) -> Any:
-            return await self._original.__anext__()
-
-    class _MessageSequencePromiseProxy(MessageSequencePromise):
-        """
-        TODO Oleksandr: give this class a better name
-        """
-
-        def __init__(self, original, *args, **kwargs) -> None:
-            self._original = original
-            super().__init__(*args, **kwargs)
-
-        def __aiter__(self) -> AsyncIterator[MessagePromise]:
-            """
-            TODO Oleksandr: do I need to proxy every method and attribute ?
-            """
-            return self._original.__aiter__()
-
-    class _MessagePromiseProxy(MessagePromise):
-        """
-        TODO Oleksandr: give this class a better name
-        """
-
-        def __init__(self, original, *args, **kwargs) -> None:
-            self._original = original
-            super().__init__(*args, **kwargs)
-
-        def __aiter__(self) -> AsyncIterator[str]:
-            """
-            TODO Oleksandr: do I need to proxy every method and attribute ?
-            """
-            return self._original.__aiter__()
-
-    async for msg_promise in ctx.message_promises:
-        ctx.reply(msg_promise)
-        try:
-            await msg_promise
-        except exceptions_to_catch:
-            ctx.reply(traceback.format_exc())
 
 
 @miniagent
@@ -148,12 +89,11 @@ async def versatilis(ctx: InteractionContext) -> None:
             prompt_messages = (*prompt_messages, AssistantMessage("<model>"))
 
         ctx.reply(
-            error_to_message_agent.inquire(
-                model_agent.inquire(
-                    prompt_messages,
-                    system="NEVER START YOUR RESPONSE WITH <model>",
-                    response_metadata={"console_style": console_style},
-                )
+            model_agent.inquire(
+                prompt_messages,
+                system="NEVER START YOUR RESPONSE WITH <model>",
+                response_metadata={"console_style": console_style},
+                errors_to_messages=True,
             )
         )
 
