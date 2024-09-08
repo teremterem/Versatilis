@@ -28,7 +28,7 @@ openai_factory = OpenAIAgent.fork(temperature=TEMPERATURE, stop=[MODEL_CLOSING_T
 MODEL_AGENT_FACTORIES = {
     "chatgpt-4o-latest": openai_factory,
     "claude-3-5-sonnet-20240620": anthropic_factory,
-    "gpt-4o-2024-05-13": openai_factory,
+    # "gpt-4o-2024-05-13": openai_factory,
     # "gpt-4o-mini-2024-07-18": openai_factory,
 }
 MODEL_AGENTS = {model: agent_factory.fork(model=model) for model, agent_factory in MODEL_AGENT_FACTORIES.items()}
