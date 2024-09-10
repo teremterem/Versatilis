@@ -19,26 +19,19 @@ load_dotenv()
 
 VERSATILIS_FOLDER = Path.home() / ".versatilis"
 
-CLAUDE_3_5_SONNET = "claude-3-5-sonnet-20240620"
-GPT_4O = "gpt-4o-2024-08-06"
+TEMPERATURE = 0
+MODEL_CLOSING_TAG = "</model>"
 
-MAX_OUTPUT_TOKENS = 4096
+anthropic_factory = AnthropicAgent.fork(temperature=TEMPERATURE, max_tokens=4096, stop_sequences=[MODEL_CLOSING_TAG])
+openai_factory = OpenAIAgent.fork(temperature=TEMPERATURE, stop=[MODEL_CLOSING_TAG])
 
 MODEL_AGENT_FACTORIES = {
-    CLAUDE_3_5_SONNET: AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    "claude-3-opus-20240229": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    "claude-3-haiku-20240307": AnthropicAgent.fork(max_tokens=MAX_OUTPUT_TOKENS, stop_sequences=["</model>"]),
-    GPT_4O: OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4-turbo-2024-04-09": OpenAIAgent.fork(stop=["</model>"]),
-    "gpt-4o-mini-2024-07-18": OpenAIAgent.fork(stop=["</model>"]),
+    "chatgpt-4o-latest": openai_factory,
+    "claude-3-5-sonnet-20240620": anthropic_factory,
+    # "gpt-4o-2024-05-13": openai_factory,
+    # "gpt-4o-mini-2024-07-18": openai_factory,
 }
-MODEL_AGENTS = {
-    model: MODEL_AGENT_FACTORIES[model].fork(model=model, temperature=0)
-    for model in [
-        CLAUDE_3_5_SONNET,
-        GPT_4O,
-    ]
-}
+MODEL_AGENTS = {model: agent_factory.fork(model=model) for model, agent_factory in MODEL_AGENT_FACTORIES.items()}
 
 
 class ModelAwareMessage(Message):
@@ -50,7 +43,8 @@ class ModelAwareMessage(Message):
 
         <model {model_name}>{message_content}</model>
 
-    If no model is specified or there is no content, it behaves like a regular Message.
+    If the message is not an assistant message or there is no content, it will be formatted the usual way,
+    using the parent class.
     """
 
     model: Optional[str] = None
@@ -60,11 +54,13 @@ class ModelAwareMessage(Message):
         """
         Whether the message is (or should be) wrapped with a model tag.
         """
-        return bool(self.model and self.content and self.content.strip())
+        return bool(self.role == "assistant" and self.content and self.content.strip())
 
     def _as_string(self) -> str:
         if self.is_wrapped_with_model_tag:
-            return f"<model {self.model}>{self.content}</model>"
+            if self.model:
+                return f"<model {self.model}>{self.content}</model>"
+            return f"<model>{self.content}</model>"
         return super()._as_string()
 
 
@@ -97,6 +93,7 @@ async def versatilis(ctx: InteractionContext) -> None:
                 prompt_messages,
                 system="NEVER START YOUR RESPONSE WITH <model>",
                 response_metadata={"console_style": console_style},
+                errors_to_messages=True,
             )
         )
 
