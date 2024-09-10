@@ -6,14 +6,14 @@
 #
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.34.1
+anthropic==0.34.2
     # via -r requirements.in
 anyio==4.4.0
     # via
     #   anthropic
     #   httpx
     #   openai
-certifi==2024.7.4
+certifi==2024.8.30
     # via
     #   httpcore
     #   httpx
@@ -28,9 +28,9 @@ distro==1.9.0
     #   openai
 exceptiongroup==1.2.2
     # via anyio
-filelock==3.15.4
+filelock==3.16.0
     # via huggingface-hub
-fsspec==2024.6.1
+fsspec==2024.9.0
     # via huggingface-hub
 gnureadline==8.2.10
     # via xonsh
@@ -38,13 +38,13 @@ h11==0.14.0
     # via httpcore
 httpcore==1.0.5
     # via httpx
-httpx==0.27.0
+httpx==0.27.2
     # via
     #   anthropic
     #   openai
 huggingface-hub==0.24.6
     # via tokenizers
-idna==3.7
+idna==3.8
     # via
     #   anyio
     #   httpx
@@ -57,9 +57,9 @@ markdown-it-py==3.0.0
     # via miniagents
 mdurl==0.1.2
     # via markdown-it-py
-#miniagents==0.0.23
+miniagents==0.0.24
     # via -r requirements.in
-openai==1.42.0
+openai==1.44.1
     # via -r requirements.in
 packaging==24.1
     # via huggingface-hub
@@ -67,12 +67,12 @@ prompt-toolkit==3.0.47
     # via
     #   miniagents
     #   xonsh
-pydantic==2.8.2
+pydantic==2.9.1
     # via
     #   anthropic
     #   miniagents
     #   openai
-pydantic-core==2.20.1
+pydantic-core==2.23.3
     # via pydantic
 pygments==2.18.0
     # via xonsh
@@ -113,5 +113,7 @@ urllib3==2.2.2
     # via requests
 wcwidth==0.2.13
     # via prompt-toolkit
+wrapt==1.16.0
+    # via miniagents
 xonsh==0.18.3
     # via -r requirements.in
